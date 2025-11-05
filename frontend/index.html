@@ -1,13 +1,39 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    
+    <!-- === INICIO DE MODIFICACIONES PWA === -->
+    
+    <!-- 1. Referencia al Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- 2. Color del tema para la barra de estado (móvil) -->
+    <meta name="theme-color" content="#06b6d4" />
+
+    <!-- === FIN DE MODIFICACIONES PWA === -->
+
+    <title>EnergiSense Dashboard</title>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+
+    <!-- 3. Script para registrar el Service Worker -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(registration => {
+              console.log('ServiceWorker registrado con éxito:', registration.scope);
+            })
+            .catch(error => {
+              console.log('Fallo en el registro del ServiceWorker:', error);
+            });
+        });
+      }
+    </script>
   </body>
 </html>

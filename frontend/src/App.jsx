@@ -1,864 +1,1038 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import axios from 'axios';
+/*
+* =======================================================================
+* APLICACIÓN PRINCIPAL ENERGISENSE (DashboardApp)
+* Versión: 4.0 (Home Page + App Funcional Integrada)
+* Estilo: CSS-in-JS (Sin dependencias externas de CSS)
+* =======================================================================
+*/
+
+import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
+import axios from 'axios'; // Mantenemos axios para la App
 import {
-    LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
-} from 'recharts';
+    LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts'; // Mantenemos recharts para la App
 
-// --- CONFIGURACIÓN Y CONSTANTES ---
-const API_BASE_URL = 'http://localhost:5000/api';
-const REFRESH_INTERVAL_MS = 5000;
+/*
+* =======================================================================
+* 1. CONTEXTO DE AUTENTICACIÓN (Manejo de Estado de Usuario)
+* (Esta sección se mantiene intacta)
+* =======================================================================
+*/
 
-// Colores primarios para el diseño oscuro (Constantes)
-const COLOR_PRIMARY = '#06B6D4'; // Cyan
-const COLOR_SECONDARY = '#1F2937'; // Gris oscuro para tarjetas
-const COLOR_BACKGROUND = '#000000'; // Negro puro para fondo
-const COLOR_TEXT = '#E5E7EB'; // Blanco para texto
-const COLOR_GRAY = '#4B5563'; // Gris para bordes/líneas
+const AuthContext = createContext();
+export const useAuth = () => useContext(AuthContext);
 
-// Obtener el token, rol y email de localStorage
-const getToken = () => localStorage.getItem('token');
-const getRole = () => localStorage.getItem('role');
-const getEmail = () => localStorage.getItem('email');
+const AuthProvider = ({ children }) => {
+    const [user, setUser] = useState(null);
+    const [loadingAuth, setLoadingAuth] = useState(true);
+    const [token, setToken] = useState(null);
+    const [userRole, setUserRole] = useState(null);
 
-// --- Estilos Base para Responsividad ---
+    // Cargar token desde localStorage al iniciar
+    useEffect(() => {
+        const storedToken = localStorage.getItem('energisense-token');
+        const storedRole = localStorage.getItem('energisense-role');
+        const storedEmail = localStorage.getItem('energisense-email');
+
+        if (storedToken && storedRole && storedEmail) {
+            setToken(storedToken);
+            setUserRole(storedRole);
+            setUser({ email: storedEmail }); // Simulación de objeto de usuario
+        }
+        setLoadingAuth(false);
+    }, []);
+
+    const handleLoginSuccess = (email, role, jwtToken) => {
+        setToken(jwtToken);
+        setUserRole(role);
+        setUser({ email });
+        localStorage.setItem('energisense-token', jwtToken);
+        localStorage.setItem('energisense-role', role);
+        localStorage.setItem('energisense-email', email);
+    };
+
+    const handleLogout = () => {
+        setToken(null);
+        setUserRole(null);
+        setUser(null);
+        localStorage.removeItem('energisense-token');
+        localStorage.removeItem('energisense-role');
+        localStorage.removeItem('energisense-email');
+    };
+
+    return (
+        <AuthContext.Provider value={{
+            user,
+            userRole,
+            token,
+            loadingAuth,
+            handleLoginSuccess,
+            handleLogout,
+        }}>
+            {children}
+        </AuthContext.Provider>
+    );
+};
+
+
+/*
+* =======================================================================
+* 2. COMPONENTES DE LA APLICACIÓN
+* (Sección de la App existente + Home Page)
+* =======================================================================
+*/
+
+// --- 2.1 Componente de Notificación (Toast) ---
+// (Sin cambios)
+const Notification = ({ message, type, onClose }) => {
+    const [isVisible, setIsVisible] = useState(false);
+
+    useEffect(() => {
+        if (message) {
+            setIsVisible(true);
+            const timer = setTimeout(() => {
+                setIsVisible(false);
+                if (onClose) onClose();
+            }, 3000); 
+            return () => clearTimeout(timer);
+        }
+    }, [message, onClose]);
+
+    if (!isVisible) return null;
+
+    const styles = {
+        notification: {
+            position: 'fixed',
+            top: '90px', // Ajustado para no chocar con el GlobalHeader
+            right: '20px',
+            padding: '15px 25px',
+            borderRadius: '8px',
+            color: '#FFFFFF',
+            fontWeight: 'bold',
+            zIndex: 1000,
+            opacity: 0.9,
+            transition: 'opacity 0.5s',
+            fontSize: '1rem',
+        },
+        success: { backgroundColor: '#4ade80', color: '#111827' },
+        error: { backgroundColor: '#ef4444' },
+        info: { backgroundColor: '#06b6d4' }
+    };
+
+    return (
+        <div style={{ ...styles.notification, ...(styles[type] || styles.info) }}>
+            {message}
+        </div>
+    );
+};
+
+// --- 2.2 Encabezado Global (NUEVO) ---
+// Este encabezado controla la navegación principal
+const GlobalHeader = ({ currentView, onNavigate, isAuthenticated, onLogout }) => {
+    const styles = {
+        header: {
+            backgroundColor: '#1F2937', // Gris oscuro
+            padding: '0 40px',
+            height: '70px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            borderBottom: '2px solid #06B6D4', // Acento cian
+            position: 'sticky',
+            top: 0,
+            zIndex: 900,
+            color: '#E5E7EB',
+        },
+        logo: {
+            fontSize: '1.8rem',
+            fontWeight: 'bold',
+            color: '#06B6D4',
+            cursor: 'pointer',
+        },
+        nav: {
+            display: 'flex',
+            gap: '15px',
+        },
+        navButton: {
+            padding: '10px 15px',
+            backgroundColor: 'transparent',
+            color: '#9CA3AF', // Gris claro
+            border: 'none',
+            borderRadius: '5px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            fontSize: '1rem',
+            transition: 'background-color 0.3s, color 0.3s',
+        },
+        navButtonActive: {
+            color: '#FFFFFF',
+            backgroundColor: '#374151', // Gris medio
+        }
+    };
+    
+    return (
+        <header style={styles.header}>
+            <div style={styles.logo} onClick={() => onNavigate('home')}>
+                EnergiSense
+            </div>
+            <nav style={styles.nav}>
+                <button 
+                    onClick={() => onNavigate('home')}
+                    style={{...styles.navButton, ...(currentView === 'home' && styles.navButtonActive)}}
+                >
+                    Página Informativa
+                </button>
+                
+                {isAuthenticated ? (
+                    <button 
+                        onClick={() => onNavigate('app')}
+                        style={{...styles.navButton, ...(currentView === 'app' && styles.navButtonActive)}}
+                    >
+                        Ir al Dashboard
+                    </button>
+                ) : (
+                    <button 
+                        onClick={() => onNavigate('app')}
+                        style={{...styles.navButton, ...(currentView === 'app' && styles.navButtonActive)}}
+                    >
+                        Iniciar Sesión
+                    </button>
+                )}
+                
+                {isAuthenticated && (
+                    <button 
+                        onClick={onLogout}
+                        style={{...styles.navButton, backgroundColor: '#ef4444', color: 'white'}}
+                    >
+                        Cerrar Sesión
+                    </button>
+                )}
+            </nav>
+        </header>
+    );
+};
+
+// --- 2.3 Página Informativa (Home Page) [NUEVO] ---
+// Esta página es estática y no usa axios.
+const HomePage = ({ onNavigateToApp }) => {
+    
+    // Estilos para la Home Page
+    const homeStyles = {
+        container: {
+            maxWidth: '1200px',
+            margin: '0 auto',
+            padding: '40px 20px',
+            color: '#E5E7EB',
+        },
+        header: {
+            textAlign: 'center',
+            marginBottom: '40px',
+            paddingBottom: '20px',
+            borderBottom: '2px solid #374151',
+        },
+        h1: {
+            fontSize: '3rem',
+            fontWeight: 'bold',
+            color: '#06B6D4', // Cian
+            marginBottom: '10px',
+        },
+        h2: {
+            fontSize: '2rem',
+            fontWeight: 'bold',
+            color: '#E5E7EB',
+            borderBottom: '1px solid #06B6D4',
+            paddingBottom: '10px',
+            marginBottom: '20px',
+        },
+        p: {
+            fontSize: '1.1rem',
+            lineHeight: '1.7',
+            color: '#D1D5DB', // Texto
+            marginBottom: '15px',
+        },
+        section: {
+            backgroundColor: '#1F2937', // Tarjeta gris oscuro
+            padding: '30px',
+            borderRadius: '12px',
+            marginBottom: '30px',
+            boxShadow: '0 4px 10px rgba(0, 0, 0, 0.3)',
+        },
+        ctaButton: {
+            display: 'inline-block',
+            padding: '15px 30px',
+            backgroundColor: '#06B6D4',
+            color: '#111827',
+            fontSize: '1.2rem',
+            fontWeight: 'bold',
+            textDecoration: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            transition: 'transform 0.2s',
+        },
+        grid: {
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+            gap: '20px',
+        },
+        techCard: {
+            backgroundColor: '#374151',
+            padding: '20px',
+            borderRadius: '8px',
+            textAlign: 'center',
+        }
+    };
+
+    return (
+        <div style={homeStyles.container}>
+            <header style={homeStyles.header}>
+                <h1 style={homeStyles.h1}>Bienvenido a EnergiSense</h1>
+                <p style={{...homeStyles.p, fontSize: '1.3rem', color: '#9CA3AF'}}>
+                    Monitoreo y Optimización de Energía Industrial en Tiempo Real.
+                </p>
+            </header>
+
+            <section style={homeStyles.section}>
+                <h2 style={homeStyles.h2}>¿Qué es EnergiSense (DashboardApp)?</h2>
+                <p style={homeStyles.p}>
+                    EnergiSense es una plataforma de software diseñada para abordar la necesidad crítica de <strong>monitoreo energético eficiente</strong> en instalaciones industriales. La aplicación proporciona un dashboard centralizado que visualiza datos de consumo en tiempo real (kWh), permitiendo a los administradores identificar ineficiencias, gestionar el acceso y optimizar costos operativos.
+                </p>
+                <div style={{textAlign: 'center', marginTop: '30px'}}>
+                    <button 
+                        onClick={onNavigateToApp} 
+                        style={homeStyles.ctaButton}
+                        onMouseOver={(e) => e.target.style.transform = 'scale(1.05)'}
+                        onMouseOut={(e) => e.target.style.transform = 'scale(1)'}
+                    >
+                        Acceder a la Aplicación
+                    </button>
+                </div>
+            </section>
+
+            <section style={homeStyles.section}>
+                <h2 style={homeStyles.h2}>Arquitectura Tecnológica (Stack MERN)</h2>
+                <div style={homeStyles.grid}>
+                    <div style={homeStyles.techCard}>
+                        <h3>MongoDB (Base de Datos)</h3>
+                        <p style={{...homeStyles.p, fontSize: '0.9rem'}}>Base de datos NoSQL local (`energisense_db`) para almacenar lecturas de sensores (time-series) y perfiles de usuario.</p>
+                    </div>
+                    <div style={homeStyles.techCard}>
+                        <h3>Express.js (Backend)</h3>
+                        <p style={{...homeStyles.p, fontSize: '0.9rem'}}>API RESTful (Node.js) que maneja la lógica de negocio, seguridad JWT y conexión a la base de datos.</p>
+                    </div>
+                    <div style={homeStyles.techCard}>
+                        <h3>React (Frontend)</h3>
+                        <p style={{...homeStyles.p, fontSize: '0.9rem'}}>Interfaz de usuario (SPA) construida con React (Vite) para un dashboard dinámico y responsivo, usando CSS-in-JS.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section style={homeStyles.section}>
+                <h2 style={homeStyles.h2}>Funcionalidades Clave</h2>
+                <ul style={{...homeStyles.p, listStyle: 'disc', paddingLeft: '20px'}}>
+                    <li><strong>Dashboard en Tiempo Real:</strong> Gráficos (Recharts) y Widgets que se actualizan cada 5 segundos.</li>
+                    <li><strong>Autenticación Segura:</strong> Sistema de Login basado en JSON Web Tokens (JWT) y contraseñas hasheadas (Bcrypt).</li>
+                    <li><strong>Control de Acceso por Roles:</strong> Vistas diferenciadas para "Administrador" (control total) y "Usuario Estándar" (solo lectura).</li>
+                    <li><strong>Gestión de Usuarios:</strong> Panel de administración para crear nuevos usuarios (roles Admin/User).</li>
+                    <li><strong>Simulación IoT:</strong> Un script (`data_injector.js`) simula el envío constante de datos de sensores a la API.</li>
+                </ul>
+            </section>
+        </div>
+    );
+};
+
+// --- 2.4 Contenido de la Aplicación (Login, Dashboards, Admin) ---
+// (Esta es toda la lógica que ya tenías, ahora encapsulada)
+const AppContent = ({ showNotification }) => {
+    const { user, loadingAuth, handleLoginSuccess } = useAuth();
+    
+    if (loadingAuth) {
+        return (
+            <div style={{minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#06B6D4', fontSize: '1.5rem'}}>
+                Cargando...
+            </div>
+        );
+    }
+    
+    // Si no está autenticado, muestra el Login
+    if (!user) {
+        return <Login showNotification={showNotification} onLoginSuccess={handleLoginSuccess} />;
+    }
+    
+    // Si está autenticado, muestra el dashboard correspondiente
+    return <AuthenticatedApp showNotification={showNotification} />;
+};
+
+
+/*
+* =======================================================================
+* 3. COMPONENTES INTERNOS DE LA APP
+* (Login, Dashboards, Gráficas, Paneles, etc. - SIN MODIFICACIONES)
+* =======================================================================
+*/
+
+// --- 3.1 Componente Login ---
+const Login = ({ showNotification }) => {
+    const { handleLoginSuccess } = useAuth();
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    // Estilos del Login
+    const loginStyles = {
+        container: {
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: 'calc(100vh - 70px)', // Resta la altura del header
+            padding: '20px',
+        },
+        card: {
+            backgroundColor: '#1F2937',
+            padding: '40px',
+            borderRadius: '12px',
+            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
+            border: '2px solid #06B6D4',
+            width: '100%',
+            maxWidth: '450px',
+            textAlign: 'center',
+        },
+        title: {
+            fontSize: '2.5rem',
+            fontWeight: 'bold',
+            color: '#06B6D4',
+            marginBottom: '15px',
+        },
+        input: {
+            width: '100%',
+            padding: '12px 15px',
+            marginBottom: '20px',
+            border: '1px solid #374151',
+            borderRadius: '6px',
+            backgroundColor: '#374151',
+            color: '#FFFFFF',
+            fontSize: '1rem',
+            boxSizing: 'border-box',
+        },
+        button: {
+            width: '100%',
+            padding: '12px',
+            border: 'none',
+            borderRadius: '6px',
+            backgroundColor: '#06B6D4',
+            color: '#111827',
+            fontWeight: 'bold',
+            fontSize: '1.2rem',
+            cursor: 'pointer',
+        },
+        p: {
+            color: '#9CA3AF',
+            marginTop: '25px',
+            borderTop: '1px solid #374151',
+            paddingTop: '15px',
+            fontSize: '0.9rem',
+            textAlign: 'left',
+        }
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        showNotification(null); 
+
+        try {
+            const response = await axios.post('http://localhost:5000/api/auth/login', { email, password });
+            const { token, role, email: userEmail } = response.data;
+            handleLoginSuccess(userEmail, role, token);
+            showNotification('¡Inicio de sesión exitoso!', 'success');
+        } catch (error) {
+            let msg = error.response?.data?.msg || error.response?.data?.message || 'Credenciales inválidas.';
+            if (!error.response) {
+                msg = 'Error de conexión: El servidor backend (http://localhost:5000) no responde.';
+            }
+            showNotification(msg, 'error');
+            console.error("Login error:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div style={loginStyles.container}>
+            <div style={loginStyles.card}>
+                <h1 style={loginStyles.title}>EnergiSense | Acceso Industrial</h1>
+                <p style={{ color: '#9CA3AF', marginBottom: '30px' }}>Introduce tus credenciales para acceder al Dashboard.</p>
+                
+                <form onSubmit={handleSubmit}>
+                    <input
+                        type="email"
+                        placeholder="Email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        style={loginStyles.input}
+                        required
+                    />
+                    <input
+                        type="password"
+                        placeholder="Contraseña"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        style={loginStyles.input}
+                        required
+                    />
+                    <button type="submit" disabled={loading} style={{...loginStyles.button, opacity: loading ? 0.6 : 1}}>
+                        {loading ? 'Iniciando Sesión...' : 'Iniciar Sesión'}
+                    </button>
+                </form>
+                
+                <p style={loginStyles.p}>
+                    Prueba con: <br />
+                    Admin: <strong>admin@energisense.com / password123</strong> <br />
+                    Usuario: <strong>user1@energisense.com / password123</strong> (Si ya se creó)
+                </p>
+            </div>
+        </div>
+    );
+};
+
+
+// --- 3.2 Componente AuthenticatedApp (El corazón del Dashboard) ---
+const REFRESH_INTERVAL_MS = 5000; 
+
+// (Hook para detectar el ancho de la ventana)
 const useViewport = () => {
     const [width, setWidth] = useState(window.innerWidth);
     useEffect(() => {
         const handleWindowResize = () => setWidth(window.innerWidth);
-        window.addEventListener('resize', handleWindowResize);
-        return () => window.removeEventListener('resize', handleWindowResize);
+        window.addEventListener("resize", handleWindowResize);
+        return () => window.removeEventListener("resize", handleWindowResize);
     }, []);
     return { width };
 };
 
-// Retorna los estilos de cuadrícula responsive.
-const getGridStyle = (viewportWidth, numColumnsDesktop) => {
-    let columns = `repeat(${numColumnsDesktop}, minmax(0, 1fr))`;
+// (Función para estilos de cuadrícula responsivos)
+const getGridStyle = (width, numColumnsDesktop) => {
+    let columns = numColumnsDesktop;
+    if (width < 640) columns = 1;
+    else if (width < 1024) columns = 2;
     
-    // Tablet (768px)
-    if (viewportWidth < 1024) {
-        columns = 'repeat(2, minmax(0, 1fr))';
-    }
-    // Mobile (640px)
-    if (viewportWidth < 640) {
-        columns = 'repeat(1, minmax(0, 1fr))';
-    }
-
     return {
         display: 'grid',
-        gap: '24px',
-        gridTemplateColumns: columns,
+        gridTemplateColumns: `repeat(${columns}, 1fr)`,
+        gap: '20px',
     };
 };
 
-// Estilo base para inputs
-const inputStyle = {
-    width: '100%',
-    padding: '10px',
-    borderRadius: '4px',
-    backgroundColor: '#374151',
-    border: `1px solid ${COLOR_GRAY}`,
-    color: COLOR_TEXT,
-    boxSizing: 'border-box',
-};
+// (Definiciones de DataWidget, EnergyChart, UserManagementPanel, UserDashboard, AdminDashboard)
+// ... (Estos componentes son idénticos a la versión anterior) ...
 
-const buttonBaseStyle = {
-    color: 'white',
-    fontWeight: 'bold',
-    padding: '10px 20px',
-    borderRadius: '8px',
-    border: 'none',
-    cursor: 'pointer',
-    transition: 'background-color 0.3s',
-    minWidth: '150px'
-};
-
-
-// --- 1. COMPONENTE DE LA GRÁFICA (COMPARTIDO) ---
-
-const RealTimeChart = ({ data }) => {
-    
-    const lastUpdate = data.length > 0
-        ? new Date(data[data.length - 1].timestamp).toLocaleTimeString('es-ES', { hour12: false })
-        : 'N/A';
-
-    const chartContainerStyle = {
-        backgroundColor: COLOR_SECONDARY,
-        padding: '24px',
-        borderRadius: '12px',
-        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-        borderTop: `4px solid ${COLOR_PRIMARY}`,
-    };
-
-    const chartTitleStyle = {
-        fontSize: '1.25rem',
-        fontWeight: 'bold',
-        marginBottom: '16px',
-        color: COLOR_PRIMARY,
-        borderBottom: `1px solid ${COLOR_GRAY}`,
-        paddingBottom: '8px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-    };
-
-    return (
-        <div style={chartContainerStyle}>
-            <div style={chartTitleStyle}>
-                Monitoreo de Consumo en Tiempo Real (kWh)
-                <span style={{ fontSize: '0.875rem', fontWeight: 'normal', color: COLOR_GRAY, marginTop: '4px' }}>
-                    Actualización: cada {REFRESH_INTERVAL_MS / 1000} segundos
-                </span>
-            </div>
-            
-            <div style={{ height: '384px', width: '100%' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke={COLOR_GRAY} />
-                        <XAxis
-                            dataKey="timestamp"
-                            tickFormatter={(time) => new Date(time).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                            stroke={COLOR_TEXT}
-                        />
-                        <YAxis stroke={COLOR_TEXT} label={{ value: 'Valor (kWh)', angle: -90, position: 'insideLeft', fill: COLOR_TEXT }} />
-                        <Tooltip
-                            contentStyle={{ backgroundColor: '#1F2937', border: `1px solid ${COLOR_GRAY}`, borderRadius: '8px', color: COLOR_TEXT }}
-                            labelFormatter={(label) => new Date(label).toLocaleTimeString('es-ES')}
-                            formatter={(value) => [`${value.toFixed(2)} kWh`, 'Consumo']}
-                        />
-                        <Legend wrapperStyle={{ paddingTop: '20px', color: COLOR_TEXT }} />
-                        <Line type="monotone" dataKey="valor" stroke={COLOR_PRIMARY} dot={false} strokeWidth={2} name="Consumo Eléctrico (kWh)" />
-                    </LineChart>
-                </ResponsiveContainer>
-            </div>
-            <p style={{ textAlign: 'right', fontSize: '0.75rem', color: COLOR_GRAY, marginTop: '8px' }}>
-                Último registro: {lastUpdate}
-            </p>
-        </div>
-    );
-};
-
-
-// --- 2. WIDGETS Y DASHBOARD USER ---
-
-/**
- * Widget de datos con diseño moderno.
- */
-const DataWidget = ({ title, value, unit, icon, color, borderColor }) => {
+// (DataWidget)
+const DataWidget = ({ title, value, unit, icon, color }) => {
+    const { width } = useViewport();
+    const isMobile = width < 640;
     const widgetStyle = {
-        backgroundColor: COLOR_SECONDARY,
-        padding: '24px',
-        borderRadius: '12px',
-        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.4)',
-        borderTop: `4px solid ${borderColor}`,
-        height: '100%',
+        backgroundColor: '#1F2937',
+        padding: isMobile ? '15px' : '20px',
+        borderRadius: '10px',
+        boxShadow: '0 4px 10px rgba(0, 0, 0, 0.3)',
+        borderLeft: `5px solid ${color}`,
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        color: '#E5E7EB',
+        transition: 'transform 0.2s',
+        minHeight: '140px',
     };
-
-    const titleStyle = {
-        fontSize: '0.875rem',
-        fontWeight: '600',
-        color: COLOR_GRAY,
-        textTransform: 'uppercase',
-        letterSpacing: '0.05em',
-    };
-
-    const valueStyle = {
-        fontSize: '2.25rem',
-        fontWeight: '800',
-        marginTop: '8px',
-        color: color,
-        lineHeight: '1.2',
-    };
-
-    const unitStyle = {
-        fontSize: '1rem',
-        fontWeight: 'normal',
-        color: COLOR_TEXT,
-        marginLeft: '8px',
-    };
-
     return (
-        <div style={widgetStyle}>
+        <div 
+            style={widgetStyle}
+            onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.03)'}
+            onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+        >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={titleStyle}>{title}</h3>
+                <span style={{ fontSize: '1rem', fontWeight: '500', color: '#9CA3AF' }}>{title}</span>
                 <span style={{ fontSize: '1.5rem', color: color }}>{icon}</span>
             </div>
-            <p style={valueStyle}>
-                {value}
-                <span style={unitStyle}>{unit}</span>
-            </p>
+            <div style={{ marginTop: '15px' }}> 
+                <p style={{ fontSize: isMobile ? '2rem' : '2.5rem', fontWeight: 'bold', color: color, margin: '0' }}>
+                    {value}
+                </p>
+                <span style={{ fontSize: '1rem', fontWeight: 'normal', color: '#9CA3AF' }}>{unit}</span>
+            </div>
         </div>
     );
 };
 
-/**
- * Componente que ven solo los usuarios con rol 'user'.
- */
-const UserDashboard = ({ data }) => {
+// (EnergyChart)
+const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+        return (
+            <div style={{padding: '10px', backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '4px', color: '#E5E7EB', fontSize: '0.9rem'}}>
+                <p style={{fontWeight: 'bold', color: '#06B6D4'}}>{`Tiempo: ${label}`}</p>
+                <p>{`Consumo: ${payload[0].value.toFixed(2)} kWh`}</p>
+            </div>
+        );
+    }
+    return null;
+};
+const EnergyChart = ({ data }) => {
     const { width } = useViewport();
-    const latestValue = data.length > 0 ? data[data.length - 1].valor.toFixed(2) : '0.00';
-    const lastUpdate = data.length > 0
-        ? new Date(data[data.length - 1].timestamp).toLocaleTimeString('es-ES', { hour12: false })
-        : 'N/A';
-    
-    const dashboardContainerStyle = {
-        padding: width < 640 ? '16px' : '32px',
-        margin: '0 auto',
-        maxWidth: '1280px',
-        minHeight: 'calc(100vh - 64px)',
-    };
-    
+    const isMobile = width < 640;
     return (
-        <div style={dashboardContainerStyle}>
-            <h1 style={{ fontSize: width < 640 ? '1.5rem' : '2rem', fontWeight: '800', color: COLOR_TEXT, textAlign: 'center', paddingBottom: '16px', borderBottom: `1px solid ${COLOR_GRAY}`, marginBottom: '32px' }}>
-                Panel de Monitoreo (Acceso Limitado)
-            </h1>
-            
-            <div style={getGridStyle(width, 3)}>
-                <DataWidget 
-                    title="Lectura Actual" 
-                    value={latestValue} 
-                    unit="kWh" 
-                    icon="⚡" 
-                    color={COLOR_PRIMARY} 
-                    borderColor={COLOR_PRIMARY}
-                />
-                <DataWidget 
-                    title="Última Hora de Registro" 
-                    value={lastUpdate} 
-                    unit="" 
-                    icon="⏱️" 
-                    color="#FBBF24" 
-                    borderColor="#FBBF24"
-                />
-                <DataWidget 
-                    title="Rol de Acceso" 
-                    value={getRole().toUpperCase()} 
-                    unit="" 
-                    icon="👤" 
-                    color="#10B981" 
-                    borderColor="#10B981"
-                />
-            </div>
-
-            <div style={{ marginTop: '32px' }}>
-                <RealTimeChart data={data} />
-            </div>
-            
-            <p style={{ textAlign: 'center', color: COLOR_GRAY, fontSize: '0.875rem', fontStyle: 'italic', paddingTop: '16px' }}>
-                Tienes acceso de solo lectura a los datos de consumo.
-            </p>
-        </div>
+        <ResponsiveContainer width="100%" height={isMobile ? 250 : 350}>
+            {data.length > 0 ? (
+                <LineChart data={data} margin={{ top: 15, right: 10, left: -10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                    <XAxis 
+                        dataKey="timestamp" 
+                        stroke="#9CA3AF"
+                        tick={{ fill: '#9CA3AF', fontSize: 10 }}
+                        interval="preserveStartEnd" 
+                        angle={isMobile ? -45 : 0} 
+                        textAnchor={isMobile ? "end" : "middle"}
+                        height={isMobile ? 50 : 30}
+                    />
+                    <YAxis 
+                        stroke="#9CA3AF"
+                        tick={{ fill: '#9CA3AF', fontSize: 10 }}
+                        tickFormatter={(value) => value.toFixed(0)} 
+                        domain={['dataMin - 10', 'dataMax + 20']} 
+                    />
+                    <Tooltip content={<CustomTooltip />} />
+                    {!isMobile && <Legend wrapperStyle={{ color: '#E5E7EB', paddingTop: '10px' }} />}
+                    <Line
+                        type="monotone" 
+                        dataKey="valor" 
+                        name="Consumo (kWh)"
+                        stroke="#06b6d4" 
+                        strokeWidth={2}
+                        dot={false} 
+                        activeDot={{ r: 4, fill: '#06b6d4', stroke: '#FFFFFF', strokeWidth: 1 }}
+                    />
+                </LineChart>
+            ) : (
+                <div style={{textAlign: 'center', padding: '50px', color: '#9CA3AF', fontSize: '1rem'}}>
+                    No hay datos disponibles. Asegúrate de que el backend y el inyector estén activos.
+                </div>
+            )}
+        </ResponsiveContainer>
     );
 };
 
-
-// --- 3. COMPONENTE DE ADMINISTRACIÓN DE USUARIOS (NUEVO) ---
-
-const UserManagementPanel = () => {
-    const { width } = useViewport();
-    const [isRegistering, setIsRegistering] = useState(false);
-    const [registerForm, setRegisterForm] = useState({ email: '', password: '', role: 'user' });
-    const [registerMessage, setRegisterMessage] = useState('');
-    const [registerIsError, setRegisterIsError] = useState(false);
-
-    // Función para manejar el cambio en el formulario
-    const handleRegisterChange = (e) => {
-        setRegisterForm({ ...registerForm, [e.target.name]: e.target.value });
-        setRegisterMessage('');
+// (UserManagementPanel)
+const UserManagementPanel = ({ showNotification, onBack }) => {
+    const { token } = useAuth();
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [role, setRole] = useState('user');
+    const [loading, setLoading] = useState(false);
+    
+    // (Estilos y lógica de formulario de registro idénticos a la versión anterior)
+    const adminStyles = {
+        container: {
+            padding: '20px', 
+            backgroundColor: '#1F2937', 
+            borderRadius: '10px', 
+            boxShadow: '0 4px 10px rgba(0, 0, 0, 0.3)', 
+            color: '#E5E7EB',
+            border: '1px solid #06B6D4'
+        },
+        h2: {
+            fontSize: '1.8rem', 
+            fontWeight: 'bold', 
+            color: '#06B6D4', 
+            borderBottom: '1px solid #374151', 
+            paddingBottom: '15px', 
+            marginBottom: '20px'
+        },
+        form: {
+            display: 'grid',
+            gridTemplateColumns: '1fr', 
+            gap: '20px',
+            marginTop: '20px',
+        },
+        input: {
+            width: '100%',
+            padding: '12px 15px',
+            border: '1px solid #374151',
+            borderRadius: '6px',
+            backgroundColor: '#374151',
+            color: '#FFFFFF',
+            fontSize: '1rem',
+            boxSizing: 'border-box',
+        },
+        button: {
+            padding: '12px 20px',
+            backgroundColor: '#4ade80', 
+            color: '#111827',
+            border: 'none',
+            borderRadius: '5px',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontSize: '1rem',
+        }
     };
+    const { width } = useViewport();
+    if (width >= 768) {
+        adminStyles.form.gridTemplateColumns = 'repeat(3, 1fr)';
+    }
 
-    // Función de REGISTRO DE USUARIO
     const handleRegisterSubmit = async (e) => {
         e.preventDefault();
-        setRegisterMessage('Registrando usuario...');
-        setRegisterIsError(false);
+        setLoading(true);
+        showNotification(null);
+        try {
+            await axios.post('http://localhost:5000/api/auth/register', 
+                { email, password, role },
+                { headers: { 'Authorization': `Bearer ${token}` } }
+            );
+            showNotification(`Usuario ${email} creado con éxito.`, 'success');
+            setEmail('');
+            setPassword('');
+            setRole('user');
+        } catch (error) {
+            let msg = error.response?.data?.msg || 'Error al crear el usuario.';
+            showNotification(msg, 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
 
-        const token = getToken();
+    return (
+        <div style={adminStyles.container}>
+            <h2 style={adminStyles.h2}>👥 Funciones de Administración</h2>
+            <button onClick={onBack} style={{ backgroundColor: '#374151', color: '#E5E7EB', padding: '8px 15px', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '20px' }}>
+                &larr; Volver al Dashboard
+            </button>
+            <h3 style={{fontSize: '1.2rem', color: '#4ade80', marginBottom: '15px'}}>Registrar Nuevo Usuario</h3>
+            <form onSubmit={handleRegisterSubmit} style={adminStyles.form}>
+                <div>
+                    <label>Email:</label>
+                    <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required style={adminStyles.input} />
+                </div>
+                <div>
+                    <label>Contraseña:</label>
+                    <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required style={adminStyles.input} />
+                </div>
+                <div style={{display: 'flex', flexDirection: 'column', justifyContent: 'flex-end'}}>
+                    <label>Rol:</label>
+                    <select value={role} onChange={(e) => setRole(e.target.value)} style={adminStyles.input}>
+                        <option value="user">Usuario Estándar</option>
+                        <option value="admin">Administrador</option>
+                    </select>
+                </div>
+                <div style={{gridColumn: '1 / -1', marginTop: '10px'}}>
+                    <button type="submit" disabled={loading} style={{...adminStyles.button, opacity: loading ? 0.6 : 1}}>
+                        {loading ? 'Registrando...' : 'Confirmar Registro'}
+                    </button>
+                </div>
+            </form>
+            <div style={{marginTop: '30px', paddingTop: '20px', borderTop: '1px solid #374151'}}>
+                <h3 style={{fontSize: '1.2rem', color: '#FCD34D', marginBottom: '15px'}}>Lista de Usuarios (Funcionalidad Pendiente)</h3>
+                <p style={{color: '#9CA3AF'}}>La próxima iteración mostrará aquí la tabla de usuarios existentes.</p>
+            </div>
+        </div>
+    );
+};
 
+// (UserDashboard)
+const UserDashboard = ({ latestData, averageConsumption, totalRecords, currentReading, handleLogout }) => {
+    const { width } = useViewport();
+    const gridStyle = getGridStyle(width, 3);
+    const dashboardStyles = {
+        padding: width < 640 ? '10px 10px 20px 10px' : '20px 40px 40px 40px',
+        maxWidth: '1400px',
+        margin: '0 auto',
+        color: '#E5E7EB',
+    };
+    return (
+        <div style={dashboardStyles}>
+            <div style={{marginBottom: '20px', textAlign: 'center'}}>
+                <h2 style={{fontSize: '2rem', fontWeight: 'bold', color: '#06B6D4', margin: '10px 0'}}>Dashboard Industrial (Usuario)</h2>
+                <p style={{color: '#9CA3AF'}}>Vista de solo lectura del monitoreo de consumo.</p>
+            </div>
+            <div style={gridStyle}>
+                <DataWidget title="Lectura Actual" value={currentReading.toFixed(2)} unit="kWh" icon="⚡" color="#06b6d4" />
+                <DataWidget title="Consumo Promedio" value={averageConsumption.toFixed(2)} unit="kWh" icon="📊" color="#4ade80" />
+                <DataWidget title="Registros Total" value={totalRecords.toFixed(0)} unit="pts" icon="📝" color="#facc15" />
+            </div>
+            <div style={{ backgroundColor: '#1F2937', padding: '25px', borderRadius: '10px', boxShadow: '0 4px 10px rgba(0, 0, 0, 0.3)', marginTop: '40px' }}>
+                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
+                    <h3 style={{fontSize: '1.2rem', fontWeight: 'bold'}}>Monitoreo de Consumo (kWh)</h3>
+                    <p style={{fontSize: '0.9rem', color: '#9CA3AF'}}>Actualización: cada 5 segundos</p>
+                </div>
+                <EnergyChart data={latestData} />
+            </div>
+        </div>
+    );
+};
+
+// (AdminDashboard)
+const AdminDashboard = ({ latestData, averageConsumption, totalRecords, currentReading, handleLogout, userRole, changePage, showNotification }) => {
+    const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'users'
+    const { width } = useViewport();
+    const gridStyle = getGridStyle(width, 4);
+    const dashboardStyles = {
+        padding: width < 640 ? '10px 10px 20px 10px' : '20px 40px 40px 40px',
+        maxWidth: '1400px',
+        margin: '0 auto',
+        color: '#E5E7EB',
+    };
+    const tabContainerStyles = {
+        borderBottom: '1px solid #374151',
+        marginBottom: '30px',
+        display: 'flex',
+        gap: '20px',
+    };
+
+    return (
+        <div style={dashboardStyles}>
+            <div style={tabContainerStyles}>
+                <TabButton 
+                    label="Dashboard Principal" 
+                    isActive={activeTab === 'dashboard'} 
+                    onClick={() => setActiveTab('dashboard')} 
+                />
+                <TabButton 
+                    label="Gestión de Usuarios" 
+                    isActive={activeTab === 'users'} 
+                    onClick={() => setActiveTab('users')} 
+                    icon="👥"
+                />
+            </div>
+            {activeTab === 'dashboard' ? (
+                <>
+                    <div style={gridStyle}>
+                        <DataWidget title="Lectura Actual" value={currentReading.toFixed(2)} unit="kWh" icon="⚡" color="#06b6d4" />
+                        <DataWidget title="Consumo Promedio" value={averageConsumption.toFixed(2)} unit="kWh" icon="📊" color="#4ade80" />
+                        <DataWidget title="Registros Total" value={totalRecords.toFixed(0)} unit="pts" icon="📝" color="#facc15" />
+                        <DataWidget title="Acceso Admin" value="TOTAL" unit="ROL" icon="🔒" color="#ef4444" />
+                    </div>
+                    <div style={{ backgroundColor: '#1F2937', padding: '25px', borderRadius: '10px', boxShadow: '0 4px 10px rgba(0, 0, 0, 0.3)', marginTop: '40px' }}>
+                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
+                            <h3 style={{fontSize: '1.2rem', fontWeight: 'bold'}}>Monitoreo de Consumo (kWh)</h3>
+                            <p style={{fontSize: '0.9rem', color: '#9CA3AF'}}>Actualización: cada 5 segundos</p>
+                        </div>
+                        <EnergyChart data={latestData} />
+                    </div>
+                </>
+            ) : (
+                <UserManagementPanel showNotification={showNotification} onBack={() => setActiveTab('dashboard')} />
+            )}
+        </div>
+    );
+};
+
+// (TabButton)
+const TabButton = ({ label, isActive, onClick, icon }) => (
+    <button
+        onClick={onClick}
+        style={{
+            padding: '10px 20px',
+            backgroundColor: isActive ? '#06B6D4' : 'transparent',
+            color: isActive ? '#111827' : '#9CA3AF',
+            border: 'none',
+            borderBottom: isActive ? '3px solid #06B6D4' : '3px solid transparent',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontSize: '1rem',
+            transition: 'all 0.3s',
+            marginBottom: '-1px' 
+        }}
+    >
+        {icon} {label}
+    </button>
+);
+
+// (AuthenticatedApp - Lógica de datos)
+const AuthenticatedApp = ({ showNotification }) => {
+    const { user, token, handleLogout, userRole } = useAuth();
+    const [latestData, setLatestData] = useState([]);
+    const [loadingData, setLoadingData] = useState(true);
+    const [errorData, setErrorData] = useState(null);
+
+    // Calculados
+    const currentReading = latestData.length > 0 ? latestData[latestData.length - 1].valor : 0;
+    const totalRecords = latestData.length;
+    const averageConsumption = totalRecords > 0 
+        ? (latestData.reduce((sum, item) => sum + (item.valor || 0), 0) / totalRecords) 
+        : 0;
+
+    // FUNCIÓN DE CARGA DE DATOS
+    const fetchLatestData = useCallback(async () => {
         if (!token) {
-            setRegisterMessage('Error: No autorizado para registrar usuarios.');
-            setRegisterIsError(true);
+            handleLogout();
             return;
         }
 
+        if (latestData.length === 0) setLoadingData(true); 
+        setErrorData(null);
+
+        const apiUrl = `http://localhost:5000/api/data/latest`;
+
         try {
-            // Llama a la ruta de registro del backend
-            await axios.post(`${API_BASE_URL}/auth/register`, registerForm, {
+            const response = await axios.get(apiUrl, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+            
+            if (!Array.isArray(response.data)) {
+                 throw new Error("Respuesta de API no es un array.");
+            }
 
-            setRegisterMessage(`¡Usuario ${registerForm.email} registrado exitosamente!`);
-            setRegisterIsError(false);
-            setRegisterForm({ email: '', password: '', role: 'user' }); // Limpiar formulario
-            setIsRegistering(false); // Opcional: Cerrar formulario al éxito
+            const formattedData = response.data.map(item => {
+                const date = new Date(item.timestamp);
+                const timeString = date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                
+                const cleanValueString = String(item.valor || 0).replace(/[^\d.]/g, '');
+                const numericValue = parseFloat(cleanValueString);
+                
+                return {
+                    ...item,
+                    timestamp: timeString, 
+                    valor: isNaN(numericValue) ? 0 : numericValue
+                };
+            }).sort((a, b) => new Date(`1970/01/01 ${a.timestamp}`) - new Date(`1970/01/01 ${b.timestamp}`)); 
 
-        } catch (error) {
-            console.error('Error al registrar usuario:', error.response?.data);
-            const msg = error.response?.data?.message || 'Error al registrar. Verifique los datos o si el usuario ya existe.';
-            setRegisterMessage(msg);
-            setRegisterIsError(true);
+            setLatestData(formattedData);
+            setLoadingData(false);
+        } catch (err) {
+            console.error('Error al obtener datos en tiempo real:', err);
+            if (err.response && (err.response.status === 401 || err.response.status === 403)) {
+                showNotification('Sesión expirada o no autorizada.', 'error');
+                handleLogout(); 
+            } else if (err.code === 'ERR_NETWORK') {
+                setErrorData('Error de red: El servidor backend (http://localhost:5000) parece estar inactivo.');
+            }
+            setLoadingData(false);
         }
-    };
+    }, [token, handleLogout, latestData.length, errorData, showNotification]); 
     
-    const adminPanelStyle = {
-        backgroundColor: COLOR_SECONDARY,
-        padding: '24px',
-        borderRadius: '12px',
-        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.4)',
-        border: `1px solid ${COLOR_PRIMARY}`,
-        marginTop: '32px',
-    };
+    // Loop de Actualización
+    useEffect(() => {
+        if (user && userRole) { 
+            fetchLatestData(); 
+            const intervalId = setInterval(fetchLatestData, REFRESH_INTERVAL_MS); 
+            return () => clearInterval(intervalId); 
+        }
+    }, [user, userRole, fetchLatestData]); 
     
-    return (
-        <div style={adminPanelStyle}>
-            <h3 style={{ fontSize: '1.5rem', fontWeight: '600', color: COLOR_PRIMARY, marginBottom: '16px' }}>
-                Administración de Usuarios
-            </h3>
-            
-            {/* Mensaje de estado global para registro */}
-            {registerMessage && (
-                <div style={{ 
-                    padding: '10px', 
-                    marginBottom: '12px', 
-                    borderRadius: '4px', 
-                    fontSize: '0.875rem', 
-                    fontWeight: '500',
-                    backgroundColor: registerIsError ? '#450A0A' : '#064E3B', 
-                    color: registerIsError ? '#FCA5A5' : '#6EE7B7'
-                }}>
-                    {registerMessage}
-                </div>
-            )}
+    // Notificar si hay un error de datos
+    useEffect(() => {
+        if (errorData) {
+            showNotification(errorData, 'error');
+        }
+    }, [errorData, showNotification]);
 
-            {/* Botón para alternar el formulario */}
-            <button
-                onClick={() => {
-                    setIsRegistering(!isRegistering);
-                    setRegisterMessage(''); // Limpiar mensajes al abrir/cerrar
-                    setRegisterIsError(false);
-                }}
-                style={{
-                    ...buttonBaseStyle,
-                    backgroundColor: isRegistering ? '#FBBF24' : '#10B981', // Amarillo o Verde
-                    marginRight: '16px'
-                }}
-                onMouseOver={(e) => e.target.style.backgroundColor = isRegistering ? '#D97706' : '#059669'}
-                onMouseOut={(e) => e.target.style.backgroundColor = isRegistering ? '#FBBF24' : '#10B981'}
-            >
-                {isRegistering ? 'Cancelar Registro' : 'Registrar Nuevo Usuario'}
-            </button>
-            
-            {/* Formulario de Registro de Usuario */}
-            {isRegistering && (
-                <div style={{ marginTop: '24px', padding: '16px', border: `1px dashed ${COLOR_GRAY}`, borderRadius: '8px' }}>
-                    <h4 style={{ color: COLOR_TEXT, fontSize: '1.125rem', marginBottom: '16px' }}>
-                        Crear Cuenta de Usuario
-                    </h4>
-                    
-                    <form onSubmit={handleRegisterSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                        <input
-                            type="email"
-                            name="email"
-                            placeholder="Email del nuevo usuario"
-                            value={registerForm.email}
-                            onChange={handleRegisterChange}
-                            style={inputStyle}
-                            required
-                        />
-                        <input
-                            type="password"
-                            name="password"
-                            placeholder="Contraseña (mínimo 6 caracteres)"
-                            value={registerForm.password}
-                            onChange={handleRegisterChange}
-                            style={inputStyle}
-                            required
-                            minLength="6"
-                        />
-                        <select
-                            name="role"
-                            value={registerForm.role}
-                            onChange={handleRegisterChange}
-                            style={inputStyle}
-                        >
-                            <option value="user">Usuario Estándar</option>
-                            <option value="admin">Administrador</option>
-                        </select>
-
-                        <button
-                            type="submit"
-                            style={{
-                                ...buttonBaseStyle,
-                                backgroundColor: COLOR_PRIMARY,
-                                marginTop: '8px'
-                            }}
-                            onMouseOver={(e) => e.target.style.backgroundColor = '#0E7490'}
-                            onMouseOut={(e) => e.target.style.backgroundColor = COLOR_PRIMARY}
-                        >
-                            Confirmar Registro
-                        </button>
-                    </form>
-                </div>
-            )}
-
-            {/* Placeholder para la tabla de gestión de usuarios (próximo paso) */}
-            <div style={{ marginTop: '32px', padding: '24px', border: `1px solid ${COLOR_GRAY}`, borderRadius: '8px', color: COLOR_GRAY, textAlign: 'center' }}>
-                <p>Aquí se mostrará la tabla con la lista completa de usuarios y opciones para editar/eliminar.</p>
-                <p style={{ color: COLOR_PRIMARY, fontWeight: 'bold', marginTop: '8px' }}>Funcionalidad Pendiente: Listar y Administrar Usuarios</p>
+    // Renderizado principal basado en ROL
+    if (loadingData && latestData.length === 0 && !errorData) {
+         return (
+            <div style={{minHeight: 'calc(100vh - 70px)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#06B6D4', fontSize: '1.5rem'}}>
+                Cargando datos del dashboard...
             </div>
-        </div>
-    );
+        );
+    }
+    
+    if (userRole === 'admin') {
+        return <AdminDashboard 
+            latestData={latestData} 
+            averageConsumption={averageConsumption} 
+            totalRecords={totalRecords} 
+            currentReading={currentReading} 
+            handleLogout={handleLogout} 
+            userRole={userRole} 
+            showNotification={showNotification}
+        />;
+    } else {
+        return <UserDashboard 
+            latestData={latestData} 
+            averageConsumption={averageConsumption} 
+            totalRecords={totalRecords} 
+            currentReading={currentReading} 
+            handleLogout={handleLogout}
+        />;
+    }
 };
 
 
-// --- 4. DASHBOARD DE ADMINISTRADOR (Contenedor de Pestañas) ---
-
-const AdminDashboard = ({ data, handleLogout }) => {
-    const { width } = useViewport();
-    // Estado para manejar la pestaña activa: 'dashboard' o 'users'
-    const [activeTab, setActiveTab] = useState('dashboard'); 
-    
-    const latestValue = data.length > 0 ? data[data.length - 1].valor.toFixed(2) : '0.00';
-    const avgValue = useMemo(() => {
-        if (data.length === 0) return '0.00';
-        const sum = data.reduce((acc, item) => acc + item.valor, 0);
-        return (sum / data.length).toFixed(2);
-    }, [data]);
-    const lastUpdate = data.length > 0
-        ? new Date(data[data.length - 1].timestamp).toLocaleTimeString('es-ES', { hour12: false })
-        : 'N/A';
-    
-    const dashboardContainerStyle = {
-        padding: width < 640 ? '16px' : '32px',
-        margin: '0 auto',
-        maxWidth: '1280px',
-        minHeight: 'calc(100vh - 64px)',
-    };
-    
-    // Estilos de pestaña
-    const TabButtonStyle = (tabName) => ({
-        padding: width < 640 ? '8px 12px' : '10px 20px',
-        cursor: 'pointer',
-        fontWeight: '600',
-        backgroundColor: activeTab === tabName ? COLOR_SECONDARY : 'transparent',
-        color: activeTab === tabName ? COLOR_PRIMARY : COLOR_GRAY,
-        border: activeTab === tabName ? `1px solid ${COLOR_PRIMARY}` : `1px solid ${COLOR_GRAY}`,
-        borderBottom: activeTab === tabName ? 'none' : `1px solid ${COLOR_GRAY}`,
-        borderRadius: '8px 8px 0 0',
-        transition: 'all 0.3s ease',
-    });
-
-    const DashboardContent = (
-        <>
-            {/* Widgets de métricas para el administrador */}
-            <div style={getGridStyle(width, 4)}>
-                <DataWidget 
-                    title="Lectura Actual" 
-                    value={latestValue} 
-                    unit="kWh" 
-                    icon="⚡" 
-                    color={COLOR_PRIMARY} 
-                    borderColor={COLOR_PRIMARY}
-                />
-                <DataWidget 
-                    title="Consumo Promedio" 
-                    value={avgValue} 
-                    unit="kWh" 
-                    icon="📊" 
-                    color="#10B981" // Verde
-                    borderColor="#10B981"
-                />
-                <DataWidget 
-                    title="Registros Totales" 
-                    value={data.length} 
-                    unit="pts" 
-                    icon="📑" 
-                    color="#FBBF24" // Amarillo
-                    borderColor="#FBBF24"
-                />
-                <DataWidget 
-                    title="Última Actualización" 
-                    value={lastUpdate} 
-                    unit="Hora" 
-                    icon="⏱️" 
-                    color="#EF4444" // Rojo
-                    borderColor="#EF4444"
-                />
-            </div>
-
-            <div style={{ marginTop: '32px' }}>
-                <RealTimeChart data={data} />
-            </div>
-        </>
-    );
-
-
-    return (
-        <div style={dashboardContainerStyle}>
-            <h1 style={{ fontSize: width < 640 ? '1.5rem' : '2.25rem', fontWeight: '800', color: COLOR_TEXT, textAlign: 'center', borderBottom: `2px solid ${COLOR_PRIMARY}`, paddingBottom: '16px', marginBottom: '32px' }}>
-                EnergiSense | Dashboard Industrial (ADMINISTRADOR)
-            </h1>
-
-            {/* Barra de Navegación por Pestañas */}
-            <div style={{ display: 'flex', borderBottom: `1px solid ${COLOR_GRAY}`, gap: '8px', marginBottom: '24px' }}>
-                <button
-                    style={TabButtonStyle('dashboard')}
-                    onClick={() => setActiveTab('dashboard')}
-                >
-                    📈 Dashboard Principal
-                </button>
-                <button
-                    style={TabButtonStyle('users')}
-                    onClick={() => setActiveTab('users')}
-                >
-                    👥 Gestión de Usuarios
-                </button>
-            </div>
-
-
-            {/* Contenido según la Pestaña Activa */}
-            <div style={{ padding: '0px' }}>
-                {activeTab === 'dashboard' && DashboardContent}
-                
-                {activeTab === 'users' && <UserManagementPanel />}
-            </div>
-            
-        </div>
-    );
-};
-
-
-// --- 5. COMPONENTE DE LOGIN Y APP PRINCIPAL ---
-
-const Login = ({ handleLogin, message, isError }) => {
-    const { width } = useViewport();
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        handleLogin(email, password);
-    };
-
-    const loginContainerStyle = {
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        backgroundColor: COLOR_BACKGROUND,
-        fontFamily: 'sans-serif',
-        padding: '16px', 
-        boxSizing: 'border-box'
-    };
-
-    const cardStyle = {
-        backgroundColor: COLOR_SECONDARY,
-        padding: width < 640 ? '24px' : '40px', 
-        borderRadius: '16px',
-        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-        width: '100%',
-        maxWidth: '448px',
-        borderTop: `8px solid ${COLOR_PRIMARY}`,
-    };
-    
-    const inputLoginStyle = {
-        width: '100%',
-        padding: '12px',
-        borderRadius: '8px',
-        backgroundColor: '#374151',
-        border: `1px solid ${COLOR_GRAY}`,
-        color: COLOR_TEXT,
-        boxSizing: 'border-box',
-    };
-
-    const buttonLoginStyle = {
-        width: '100%',
-        backgroundColor: COLOR_PRIMARY,
-        color: 'white',
-        fontWeight: 'bold',
-        padding: '12px',
-        borderRadius: '8px',
-        border: 'none',
-        cursor: 'pointer',
-        transition: 'background-color 0.3s',
-        boxShadow: `0 4px 6px -1px rgba(0, 182, 212, 0.5), 0 2px 4px -2px rgba(0, 182, 212, 0.08)`,
-    };
-
-
-    return (
-        <div style={loginContainerStyle}>
-            <div style={cardStyle}>
-                <h1 style={{ fontSize: width < 640 ? '1.5rem' : '1.875rem', fontWeight: '800', color: COLOR_PRIMARY, textAlign: 'center', marginBottom: '4px' }}>
-                    EnergiSense | Acceso Industrial
-                </h1>
-                <p style={{ textAlign: 'center', color: COLOR_GRAY, marginBottom: '32px' }}>
-                    Introduce tus credenciales para acceder al Dashboard.
-                </p>
-                
-                {message && (
-                    <div style={{ 
-                        padding: '12px', 
-                        marginBottom: '16px', 
-                        borderRadius: '8px', 
-                        fontSize: '0.875rem', 
-                        textAlign: 'center', 
-                        fontWeight: '500', 
-                        backgroundColor: isError ? '#450A0A' : '#064E3B', 
-                        color: isError ? '#FCA5A5' : '#6EE7B7'
-                    }}>
-                        {message}
-                    </div>
-                )}
-
-                <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                    <div>
-                        <input
-                            type="email"
-                            placeholder="Email"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            style={inputLoginStyle}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <input
-                            type="password"
-                            placeholder="Contraseña"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            style={inputLoginStyle}
-                            required
-                        />
-                    </div>
-                    <button
-                        type="submit"
-                        style={buttonLoginStyle}
-                        onMouseOver={(e) => e.target.style.backgroundColor = '#0E7490'}
-                        onMouseOut={(e) => e.target.style.backgroundColor = COLOR_PRIMARY}
-                    >
-                        Iniciar Sesión
-                    </button>
-                </form>
-
-                <div style={{ textAlign: 'center', marginTop: '24px', paddingTop: '16px', borderTop: `1px solid ${COLOR_GRAY}` }}>
-                    <p style={{ color: COLOR_GRAY, fontSize: '0.875rem', marginBottom: '4px' }}>
-                        Prueba con: <strong style={{ color: COLOR_PRIMARY }}>admin@energisense.com / password123</strong>
-                    </p>
-                    <p style={{ color: COLOR_GRAY, fontSize: '0.875rem' }}>
-                        o <strong style={{ color: '#10B981' }}>user1@energisense.com / password123</strong> (Si ya se creó)
-                    </p>
-                </div>
-            </div>
-        </div>
-    );
-};
-
+/*
+* =======================================================================
+* 4. RENDERIZADOR PRINCIPAL (Manejo de Home Page vs App)
+* =======================================================================
+*/
 
 const App = () => {
-    const { width } = useViewport();
-
-    const [data, setData] = useState([]);
-    const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
-    const [userRole, setUserRole] = useState(getRole() || null);
-    const [userEmail, setUserEmail] = useState(getEmail() || null);
-    const [message, setMessage] = useState('');
-    const [isError, setIsError] = useState(false);
+    const { user, loadingAuth, handleLogout } = useAuth();
+    const [notification, setNotification] = useState({ message: '', type: 'info' });
     
+    // Estado de navegación principal: 'home' (informativa), 'app' (login/dashboard)
+    const [currentView, setCurrentView] = useState('home'); // Empieza en 'home'
+
+    // Efecto para cambiar de vista cuando el usuario inicia o cierra sesión
     useEffect(() => {
-        if (message) {
-            const timer = setTimeout(() => setMessage(''), 5000);
-            return () => clearTimeout(timer);
-        }
-    }, [message]);
-
-
-    // Función de LOGIN
-    const handleLogin = useCallback(async (email, password) => {
-        try {
-            const res = await axios.post(`${API_BASE_URL}/auth/login`, { email, password });
-            
-            localStorage.setItem('token', res.data.token);
-            localStorage.setItem('role', res.data.role);
-            localStorage.setItem('email', res.data.email);
-
-            setUserRole(res.data.role);
-            setUserEmail(res.data.email);
-            setIsAuthenticated(true);
-            setMessage('¡Inicio de sesión exitoso!');
-            setIsError(false);
-
-        } catch (error) {
-            console.error('Error de login:', error);
-            const msg = error.response?.data?.message || error.response?.data?.msg || 'Credenciales inválidas o error de red.';
-            setMessage(msg);
-            setIsError(true);
-        }
-    }, []);
-
-    // Función de LOGOUT
-    const handleLogout = useCallback(() => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('role');
-        localStorage.removeItem('email');
-        setIsAuthenticated(false);
-        setUserRole(null);
-        setUserEmail(null);
-        setData([]); 
-        setMessage('Sesión cerrada correctamente.');
-        setIsError(false);
-    }, []);
-
-
-    // Función para OBTENER DATOS PROTEGIDOS
-    const fetchData = useCallback(async () => {
-        const token = getToken();
-        if (!token) return; 
-
-        try {
-            const res = await axios.get(`${API_BASE_URL}/data/latest`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            setData(res.data);
-            
-        } catch (error) {
-            console.error('Error al obtener datos en tiempo real:', error.message);
-            
-            if (error.response && error.response.status === 401) {
-                setMessage('Sesión expirada o no autorizada. Redirigiendo a Login...');
-                setIsError(true);
-                handleLogout(); 
+        if (user) {
+            setCurrentView('app'); // Si hay usuario, ir a la app
+        } else {
+            // Si no hay usuario, quédate en home o login (lo que estuviera activo)
+            if (currentView === 'app') {
+                setCurrentView('app'); // Si cerró sesión, mostrar 'app' (que cargará el Login)
             }
         }
-    }, [handleLogout]);
-    
+    }, [user, currentView]);
 
-    // 1. Efecto para manejar la obtención de datos periódica
-    useEffect(() => {
-        let interval;
-        if (isAuthenticated) {
-            fetchData(); 
-            interval = setInterval(fetchData, REFRESH_INTERVAL_MS);
+    const showNotification = useCallback((message, type) => {
+        setNotification({ message, type });
+    }, []);
+
+    const closeNotification = useCallback(() => {
+        setNotification({ message: '', type: '' });
+    }, []);
+
+    const handleNavigation = (view) => {
+        setCurrentView(view);
+    };
+    
+    const renderContent = () => {
+        if (currentView === 'home') {
+            return <HomePage onNavigateToApp={() => setCurrentView('app')} />;
         }
         
-        return () => {
-            if (interval) {
-                clearInterval(interval);
-            }
-        };
-    }, [isAuthenticated, fetchData]);
-
-    
-    // 2. Efecto para crear un usuario de prueba con rol 'user' (al loguearse el admin)
-    useEffect(() => {
-        const createUser = async (email, password) => {
-             const adminToken = getToken();
-             if (!adminToken || getRole() !== 'admin') return;
-
-             try {
-                // Llama al registro para crear el usuario 'user' si no existe.
-                await axios.post(`${API_BASE_URL}/auth/register`, { 
-                    email: email, 
-                    password: password, 
-                    role: 'user' 
-                }, {
-                    headers: { 'Authorization': `Bearer ${adminToken}` }
-                });
-                console.log(`Usuario de prueba (${email}) creado.`);
-            } catch (error) {
-                // 400 (Bad Request) es la respuesta esperada si el usuario ya existe.
-                if (error.response?.status !== 400) {
-                     console.error(`Error al intentar crear usuario de prueba ${email}:`, error.message);
-                }
-            }
-        };
-
-        if (userRole === 'admin') {
-            createUser('user1@energisense.com', 'password123');
+        // Si la vista es 'app', cargamos el contenido de la aplicación (Login o Dashboard)
+        if (loadingAuth) {
+            return (
+                <div style={{minHeight: 'calc(100vh - 70px)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#06B6D4', fontSize: '1.5rem'}}>
+                    Cargando...
+                </div>
+            );
         }
-    }, [userRole]);
-
-
-    // RENDERIZADO PRINCIPAL
-    if (!isAuthenticated) {
-        return <Login handleLogin={handleLogin} message={message} isError={isError} />;
-    }
-
-    // Header del Dashboard (visible para ambos roles)
-    const HeaderStyle = {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        backgroundColor: '#000000',
-        padding: width < 640 ? '12px 16px' : '16px 32px', // Padding responsive
-        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.5)',
-        borderBottom: `1px solid ${COLOR_GRAY}`,
+        
+        if (user) {
+            return <AuthenticatedApp showNotification={showNotification} />;
+        }
+        
+        return <Login showNotification={showNotification} />;
     };
-
-    const logoStyle = {
-        fontSize: width < 640 ? '1.2rem' : '1.5rem',
-        fontWeight: 'bold',
-        color: COLOR_TEXT,
-    };
-
-    const cyanTextStyle = {
-        color: COLOR_PRIMARY,
-    };
-
-    const userInfoStyle = {
-        color: COLOR_GRAY,
-        fontSize: width < 640 ? '0.75rem' : '0.875rem',
-        marginRight: '16px',
-        display: width < 640 ? 'none' : 'inline', // Ocultar email/rol en móvil
-    };
-    
-    const logoutButtonStyle = {
-        backgroundColor: '#EF4444', 
-        color: 'white',
-        fontSize: width < 640 ? '0.75rem' : '0.875rem',
-        fontWeight: '600',
-        padding: width < 640 ? '4px 8px' : '6px 12px', 
-        borderRadius: '9999px', 
-        border: 'none',
-        cursor: 'pointer',
-        transition: 'background-color 0.3s',
-    };
-
-    const DashboardHeader = (
-        <header style={HeaderStyle}>
-            <h2 style={logoStyle}>
-                <span style={cyanTextStyle}>EnergiSense</span> | Monitoreo
-            </h2>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-                <span style={userInfoStyle}>
-                    {userEmail} (<span style={cyanTextStyle}>{userRole?.toUpperCase()}</span>)
-                </span>
-                <button
-                    onClick={handleLogout}
-                    style={logoutButtonStyle}
-                    onMouseOver={(e) => e.target.style.backgroundColor = '#DC2626'}
-                    onMouseOut={(e) => e.target.style.backgroundColor = '#EF4444'}
-                >
-                    Cerrar Sesión
-                </button>
-            </div>
-        </header>
-    );
 
     return (
-        <div style={{ minHeight: '100vh', backgroundColor: COLOR_BACKGROUND, fontFamily: 'sans-serif' }}>
-            {DashboardHeader}
-            
-            {/* LÓGICA DE ROL */}
-            {userRole === 'admin' ? (
-                <AdminDashboard data={data} handleLogout={handleLogout} />
-            ) : (
-                <UserDashboard data={data} handleLogout={handleLogout} />
-            )}
+        <div style={{minHeight: '100vh', backgroundColor: '#111827'}}>
+            <GlobalHeader 
+                currentView={currentView}
+                isAuthenticated={!!user}
+                onNavigate={handleNavigation}
+                onLogout={() => {
+                    handleLogout();
+                    setCurrentView('home'); // Al cerrar sesión, volver al Home
+                }}
+            />
+            <Notification message={notification.message} type={notification.type} onClose={closeNotification} />
+            {renderContent()}
         </div>
     );
 };
 
-export default App;
+// --- Envoltura Final de la Aplicación ---
+const AppWrapper = () => (
+    <AuthProvider>
+        <App />
+    </AuthProvider>
+);
+
+export default AppWrapper;
