@@ -1,21 +1,25 @@
 /*
 * =======================================================================
 * APLICACIÓN PRINCIPAL ENERGISENSE (DashboardApp)
-* Versión: 4.0 (Home Page + App Funcional Integrada)
+* Versión: 5.1 (Integración de EnergyFutbol desde /game/)
 * Estilo: CSS-in-JS (Sin dependencias externas de CSS)
 * =======================================================================
 */
 
 import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
-import axios from 'axios'; // Mantenemos axios para la App
+import axios from 'axios'; 
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-} from 'recharts'; // Mantenemos recharts para la App
+} from 'recharts'; 
+
+// Al ser servido por el mismo backend, usamos rutas relativas (ej. /api/auth)
+const API_BASE_URL = '';
+
 
 /*
 * =======================================================================
 * 1. CONTEXTO DE AUTENTICACIÓN (Manejo de Estado de Usuario)
-* (Esta sección se mantiene intacta)
+* (Sin cambios)
 * =======================================================================
 */
 
@@ -78,7 +82,7 @@ const AuthProvider = ({ children }) => {
 /*
 * =======================================================================
 * 2. COMPONENTES DE LA APLICACIÓN
-* (Sección de la App existente + Home Page)
+* (Sección de la App existente + Home Page + Game Page)
 * =======================================================================
 */
 
@@ -126,13 +130,13 @@ const Notification = ({ message, type, onClose }) => {
     );
 };
 
-// --- 2.2 Encabezado Global (NUEVO) ---
-// Este encabezado controla la navegación principal
+// --- 2.2 Encabezado Global (MODIFICADO) ---
+// Se añade un botón y lógica para la nueva vista 'game'
 const GlobalHeader = ({ currentView, onNavigate, isAuthenticated, onLogout }) => {
     const styles = {
         header: {
             backgroundColor: '#1F2937', // Gris oscuro
-            padding: '0 40px',
+            padding: '0 20px', // Reducido padding para más botones
             height: '70px',
             display: 'flex',
             alignItems: 'center',
@@ -142,26 +146,30 @@ const GlobalHeader = ({ currentView, onNavigate, isAuthenticated, onLogout }) =>
             top: 0,
             zIndex: 900,
             color: '#E5E7EB',
+            flexWrap: 'wrap', // Permitir que los botones pasen a la siguiente línea en pantallas muy pequeñas
         },
         logo: {
-            fontSize: '1.8rem',
+            fontSize: '1.6rem', // Ligeramente más pequeño
             fontWeight: 'bold',
             color: '#06B6D4',
             cursor: 'pointer',
+            marginRight: '10px',
         },
         nav: {
             display: 'flex',
-            gap: '15px',
+            gap: '10px', // Espacio reducido
+            alignItems: 'center',
+            flexWrap: 'wrap', // Permitir que los botones pasen a la siguiente línea
         },
         navButton: {
-            padding: '10px 15px',
+            padding: '8px 12px', // Botones más pequeños
             backgroundColor: 'transparent',
             color: '#9CA3AF', // Gris claro
             border: 'none',
             borderRadius: '5px',
             cursor: 'pointer',
             fontWeight: 'bold',
-            fontSize: '1rem',
+            fontSize: '0.9rem', // Fuente más pequeña
             transition: 'background-color 0.3s, color 0.3s',
         },
         navButtonActive: {
@@ -176,28 +184,30 @@ const GlobalHeader = ({ currentView, onNavigate, isAuthenticated, onLogout }) =>
                 EnergiSense
             </div>
             <nav style={styles.nav}>
+                {/* Botón 1: Home */}
                 <button 
                     onClick={() => onNavigate('home')}
                     style={{...styles.navButton, ...(currentView === 'home' && styles.navButtonActive)}}
                 >
-                    Página Informativa
+                    Info
                 </button>
                 
-                {isAuthenticated ? (
-                    <button 
-                        onClick={() => onNavigate('app')}
-                        style={{...styles.navButton, ...(currentView === 'app' && styles.navButtonActive)}}
-                    >
-                        Ir al Dashboard
-                    </button>
-                ) : (
-                    <button 
-                        onClick={() => onNavigate('app')}
-                        style={{...styles.navButton, ...(currentView === 'app' && styles.navButtonActive)}}
-                    >
-                        Iniciar Sesión
-                    </button>
-                )}
+                {/* Botón 2: App/Dashboard */}
+                <button 
+                    onClick={() => onNavigate('app')}
+                    style={{...styles.navButton, ...(currentView === 'app' && styles.navButtonActive)}}
+                >
+                    {isAuthenticated ? 'Dashboard' : 'Iniciar Sesión'}
+                </button>
+                
+                {/* ***** BOTÓN NUEVO ***** */}
+                <button 
+                    onClick={() => onNavigate('game')}
+                    style={{...styles.navButton, ...(currentView === 'game' && styles.navButtonActive)}}
+                >
+                    🎮 Jugar
+                </button>
+                {/* *********************** */}
                 
                 {isAuthenticated && (
                     <button 
@@ -212,8 +222,8 @@ const GlobalHeader = ({ currentView, onNavigate, isAuthenticated, onLogout }) =>
     );
 };
 
-// --- 2.3 Página Informativa (Home Page) [NUEVO] ---
-// Esta página es estática y no usa axios.
+// --- 2.3 Página Informativa (Home Page) ---
+// (Sin cambios)
 const HomePage = ({ onNavigateToApp }) => {
     
     // Estilos para la Home Page
@@ -340,10 +350,53 @@ const HomePage = ({ onNavigateToApp }) => {
     );
 };
 
-// --- 2.4 Contenido de la Aplicación (Login, Dashboards, Admin) ---
-// (Esta es toda la lógica que ya tenías, ahora encapsulada)
+// --- 2.4 Componente de Juego (MODIFICADO) ---
+// Este componente renderiza el juego en un iframe
+const GamePage = () => {
+    const styles = {
+        container: {
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'flex-start', // Alinear arriba
+            padding: '20px',
+            minHeight: 'calc(100vh - 70px)', // Restar header
+        },
+        iframe: {
+            width: '100%',
+            maxWidth: '1200px', // Limitar ancho en pantallas grandes
+            height: '75vh', // Altura de 75% del viewport (puedes ajustarlo)
+            border: '2px solid #06B6D4',
+            borderRadius: '12px',
+            backgroundColor: '#111827', // Fondo oscuro por si tarda en cargar
+        },
+        title: {
+            fontSize: '1.5rem',
+            fontWeight: 'bold',
+            color: '#E5E7EB',
+            marginBottom: '20px',
+        }
+    };
+
+    return (
+        <div style={styles.container}>
+            <h2 style={styles.title}>Minijuego: EnergyFutbol</h2>
+            {/* *** CAMBIO CLAVE: La URL ahora apunta a la carpeta del juego *** */}
+            <iframe 
+                src="/game/index.html" // Vite sirve esto desde 'DashboardApp/frontend/public/game/index.html'
+                style={styles.iframe}
+                title="EnergyFutbol Game"
+                sandbox="allow-scripts allow-same-origin" // Seguridad para iframes
+            ></iframe>
+        </div>
+    );
+};
+
+
+// --- 2.5 Contenido de la Aplicación (Login, Dashboards, Admin) ---
+// (Sin cambios)
 const AppContent = ({ showNotification }) => {
-    const { user, loadingAuth, handleLoginSuccess } = useAuth();
+    const { user, loadingAuth } = useAuth();
     
     if (loadingAuth) {
         return (
@@ -355,7 +408,7 @@ const AppContent = ({ showNotification }) => {
     
     // Si no está autenticado, muestra el Login
     if (!user) {
-        return <Login showNotification={showNotification} onLoginSuccess={handleLoginSuccess} />;
+        return <Login showNotification={showNotification} />;
     }
     
     // Si está autenticado, muestra el dashboard correspondiente
@@ -366,7 +419,8 @@ const AppContent = ({ showNotification }) => {
 /*
 * =======================================================================
 * 3. COMPONENTES INTERNOS DE LA APP
-* (Login, Dashboards, Gráficas, Paneles, etc. - SIN MODIFICACIONES)
+* (Login, Dashboards, Gráficas, Paneles, etc.)
+* (Esta sección completa no tiene cambios)
 * =======================================================================
 */
 
@@ -440,14 +494,15 @@ const Login = ({ showNotification }) => {
         showNotification(null); 
 
         try {
-            const response = await axios.post('http://localhost:5000/api/auth/login', { email, password });
+            const response = await axios.post(`${API_BASE_URL}/api/auth/login`, { email, password });
+            
             const { token, role, email: userEmail } = response.data;
             handleLoginSuccess(userEmail, role, token);
             showNotification('¡Inicio de sesión exitoso!', 'success');
         } catch (error) {
             let msg = error.response?.data?.msg || error.response?.data?.message || 'Credenciales inválidas.';
             if (!error.response) {
-                msg = 'Error de conexión: El servidor backend (http://localhost:5000) no responde.';
+                msg = `Error de conexión: El servidor backend (${API_BASE_URL}) no responde.`;
             }
             showNotification(msg, 'error');
             console.error("Login error:", error);
@@ -521,9 +576,6 @@ const getGridStyle = (width, numColumnsDesktop) => {
         gap: '20px',
     };
 };
-
-// (Definiciones de DataWidget, EnergyChart, UserManagementPanel, UserDashboard, AdminDashboard)
-// ... (Estos componentes son idénticos a la versión anterior) ...
 
 // (DataWidget)
 const DataWidget = ({ title, value, unit, icon, color }) => {
@@ -681,7 +733,8 @@ const UserManagementPanel = ({ showNotification, onBack }) => {
         setLoading(true);
         showNotification(null);
         try {
-            await axios.post('http://localhost:5000/api/auth/register', 
+            // *** CORRECCIÓN: Usar la variable API_BASE_URL ***
+            await axios.post(`${API_BASE_URL}/api/auth/register`, 
                 { email, password, role },
                 { headers: { 'Authorization': `Bearer ${token}` } }
             );
@@ -691,6 +744,10 @@ const UserManagementPanel = ({ showNotification, onBack }) => {
             setRole('user');
         } catch (error) {
             let msg = error.response?.data?.msg || 'Error al crear el usuario.';
+            if (!error.response) {
+                // *** CORRECCIÓN: Usar la variable API_BASE_URL en el error ***
+                msg = `Error de conexión: El backend (${API_BASE_URL}) no responde.`;
+            }
             showNotification(msg, 'error');
         } finally {
             setLoading(false);
@@ -735,7 +792,7 @@ const UserManagementPanel = ({ showNotification, onBack }) => {
 };
 
 // (UserDashboard)
-const UserDashboard = ({ latestData, averageConsumption, totalRecords, currentReading, handleLogout }) => {
+const UserDashboard = ({ latestData, averageConsumption, totalRecords, currentReading }) => {
     const { width } = useViewport();
     const gridStyle = getGridStyle(width, 3);
     const dashboardStyles = {
@@ -767,7 +824,7 @@ const UserDashboard = ({ latestData, averageConsumption, totalRecords, currentRe
 };
 
 // (AdminDashboard)
-const AdminDashboard = ({ latestData, averageConsumption, totalRecords, currentReading, handleLogout, userRole, changePage, showNotification }) => {
+const AdminDashboard = ({ latestData, averageConsumption, totalRecords, currentReading, showNotification }) => {
     const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'users'
     const { width } = useViewport();
     const gridStyle = getGridStyle(width, 4);
@@ -867,7 +924,7 @@ const AuthenticatedApp = ({ showNotification }) => {
         if (latestData.length === 0) setLoadingData(true); 
         setErrorData(null);
 
-        const apiUrl = `http://localhost:5000/api/data/latest`;
+        const apiUrl = `${API_BASE_URL}/api/data/latest`;
 
         try {
             const response = await axios.get(apiUrl, {
@@ -890,7 +947,7 @@ const AuthenticatedApp = ({ showNotification }) => {
                     timestamp: timeString, 
                     valor: isNaN(numericValue) ? 0 : numericValue
                 };
-            }).sort((a, b) => new Date(`1970/01/01 ${a.timestamp}`) - new Date(`1970/01/01 ${b.timestamp}`)); 
+            }).sort((a, b) => new Date(`1970/01/01 ${a.timestamp}`) - new Date(`1970/01/01 ${b.timestamp}`));
 
             setLatestData(formattedData);
             setLoadingData(false);
@@ -900,11 +957,11 @@ const AuthenticatedApp = ({ showNotification }) => {
                 showNotification('Sesión expirada o no autorizada.', 'error');
                 handleLogout(); 
             } else if (err.code === 'ERR_NETWORK') {
-                setErrorData('Error de red: El servidor backend (http://localhost:5000) parece estar inactivo.');
+                setErrorData(`Error de red: El backend (${API_BASE_URL}) parece estar inactivo.`);
             }
             setLoadingData(false);
         }
-    }, [token, handleLogout, latestData.length, errorData, showNotification]); 
+    }, [token, handleLogout, latestData.length, showNotification]); 
     
     // Loop de Actualización
     useEffect(() => {
@@ -937,8 +994,6 @@ const AuthenticatedApp = ({ showNotification }) => {
             averageConsumption={averageConsumption} 
             totalRecords={totalRecords} 
             currentReading={currentReading} 
-            handleLogout={handleLogout} 
-            userRole={userRole} 
             showNotification={showNotification}
         />;
     } else {
@@ -947,7 +1002,6 @@ const AuthenticatedApp = ({ showNotification }) => {
             averageConsumption={averageConsumption} 
             totalRecords={totalRecords} 
             currentReading={currentReading} 
-            handleLogout={handleLogout}
         />;
     }
 };
@@ -956,6 +1010,7 @@ const AuthenticatedApp = ({ showNotification }) => {
 /*
 * =======================================================================
 * 4. RENDERIZADOR PRINCIPAL (Manejo de Home Page vs App)
+* (MODIFICADO para incluir la vista 'game')
 * =======================================================================
 */
 
@@ -963,20 +1018,17 @@ const App = () => {
     const { user, loadingAuth, handleLogout } = useAuth();
     const [notification, setNotification] = useState({ message: '', type: 'info' });
     
-    // Estado de navegación principal: 'home' (informativa), 'app' (login/dashboard)
+    // Estado de navegación principal: 'home' (informativa), 'app' (login/dashboard), 'game' (juego)
     const [currentView, setCurrentView] = useState('home'); // Empieza en 'home'
 
     // Efecto para cambiar de vista cuando el usuario inicia o cierra sesión
     useEffect(() => {
-        if (user) {
-            setCurrentView('app'); // Si hay usuario, ir a la app
-        } else {
-            // Si no hay usuario, quédate en home o login (lo que estuviera activo)
-            if (currentView === 'app') {
-                setCurrentView('app'); // Si cerró sesión, mostrar 'app' (que cargará el Login)
-            }
+        // Si no estamos cargando, hay un usuario, y la vista actual es 'home',
+        // moverlos automáticamente al 'app' (dashboard).
+        if (!loadingAuth && user && currentView === 'home') {
+            setCurrentView('app'); 
         }
-    }, [user, currentView]);
+    }, [user, loadingAuth, currentView]);
 
     const showNotification = useCallback((message, type) => {
         setNotification({ message, type });
@@ -990,25 +1042,18 @@ const App = () => {
         setCurrentView(view);
     };
     
+    // Esta función ahora decide qué página principal mostrar
     const renderContent = () => {
-        if (currentView === 'home') {
-            return <HomePage onNavigateToApp={() => setCurrentView('app')} />;
+        switch (currentView) {
+            case 'home':
+                return <HomePage onNavigateToApp={() => setCurrentView('app')} />;
+            case 'game':
+                return <GamePage />;
+            case 'app':
+                return <AppContent showNotification={showNotification} />;
+            default:
+                return <HomePage onNavigateToApp={() => setCurrentView('app')} />;
         }
-        
-        // Si la vista es 'app', cargamos el contenido de la aplicación (Login o Dashboard)
-        if (loadingAuth) {
-            return (
-                <div style={{minHeight: 'calc(100vh - 70px)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#06B6D4', fontSize: '1.5rem'}}>
-                    Cargando...
-                </div>
-            );
-        }
-        
-        if (user) {
-            return <AuthenticatedApp showNotification={showNotification} />;
-        }
-        
-        return <Login showNotification={showNotification} />;
     };
 
     return (

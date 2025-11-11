@@ -1,243 +1,242 @@
-// Importaciones de módulos
+/*
+* =======================================================================
+* SERVIDOR BACKEND ENERGISENSE (Node.js / Express / MongoDB)
+* Versión: 2.0 (MODIFICADO PARA DOCKER)
+* =======================================================================
+*/
+
 const express = require('express');
-const mongoose = require('mongoose');
-const dotenv = require('dotenv');
+const path = require('path'); // <-- 1. IMPORTADO PARA SERVIR ARCHIVOS
 const cors = require('cors');
-const bcrypt = require('bcryptjs'); // Para hashear contraseñas
-const jwt = require('jsonwebtoken'); // Para tokens de autenticación
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
-// Cargar variables de entorno (MONGO_URI)
-dotenv.config();
-
-// Inicializar Express
+// Configuración de la App
 const app = express();
-const PORT = process.env.PORT || 5000;
+app.use(cors());
+app.use(express.json());
 
-// Middleware (Permite la comunicación con el frontend y el manejo de JSON)
-app.use(cors()); 
-app.use(express.json()); 
+// --- Modelos de Base de Datos (Mongoose) ---
 
-// --- DEFINICIÓN DE SCHEMAS Y MODELOS ---
-
-// 1. Modelo de Datos de Energía (ya existente)
-const dataSchema = new mongoose.Schema({
-    timestamp: { type: Date, default: Date.now },
-    value: { type: Number, required: true, default: 0 }, // Aseguramos default 0
-    type: { type: String, required: true, default: 'kWh' } // Aseguramos default 'kWh'
+// Modelo de Usuario
+const UserSchema = new mongoose.Schema({
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    role: { type: String, enum: ['user', 'admin'], default: 'user' }
 });
-const DataModel = mongoose.model('Data', dataSchema);
+const User = mongoose.model('User', UserSchema);
 
-// 2. Modelo de Usuario (NUEVO)
-const userSchema = new mongoose.Schema({
-    email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
-    role: { type: String, enum: ['user', 'admin'], default: 'user' },
+// Modelo de Datos del Sensor
+const SensorDataSchema = new mongoose.Schema({
+    sensorId: { type: String, required: true },
+    valor: { type: Number, required: true },
+    timestamp: { type: Date, default: Date.now }
 });
+const SensorData = mongoose.model('SensorData', SensorDataSchema);
 
-// Pre-save hook para hashear la contraseña antes de guardarla
-userSchema.pre('save', async function (next) {
-    if (this.isModified('password')) {
-        this.password = await bcrypt.hash(this.password, 10);
-    }
-    next();
-});
-const UserModel = mongoose.model('User', userSchema);
+// --- Conexión a MongoDB ---
+// *** 2. MODIFICACIÓN PARA DOCKER ***
+// 'host.docker.internal' es un DNS especial que permite al contenedor
+// encontrar el 'localhost' de la máquina anfitriona (tu PC).
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://host.docker.internal:27017/energisense_db';
 
-
-// --- MIDDLEWARE DE AUTENTICACIÓN (CORREGIDO) ---
-
-// Función para verificar si el token es válido
-const auth = (req, res, next) => {
-    // 1. OBTENER EL TOKEN DEL HEADER 'Authorization'
-    const authHeader = req.header('Authorization');
-    
-    if (!authHeader) {
-        return res.status(401).json({ message: 'No se encontró el header de autorización', reason: 'Missing Auth Header' });
-    }
-
-    // El formato es 'Bearer [token]', necesitamos extraer solo el token.
-    const parts = authHeader.split(' ');
-        
-    // Verificar formato (debe tener 'Bearer' y el token)
-    if (parts.length !== 2 || parts[0].toLowerCase() !== 'bearer') {
-        return res.status(401).json({ message: 'Formato de token no válido (Esperado: Bearer <token>)', reason: 'Invalid Format' });
-    }
-
-    const token = parts[1]; // Este es el JWT
-    
-    if (!token) {
-        return res.status(401).json({ message: 'No hay token, autorización denegada', reason: 'No Token Found' });
-    }
-
-    try {
-        // 2. Verificar el token y obtener el payload (user.id, user.role)
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret_key'); // Usar variable de entorno o fallback
-        req.user = decoded.user;
-        next();
-    } catch (e) {
-        // Error de verificación JWT (ej. token expirado o inválido)
-        console.error("JWT Verification Error:", e.message);
-        res.status(401).json({ message: 'Token no válido o expirado', reason: e.message });
-    }
-};
-
-// Función para restringir rutas solo a administradores
-const adminAuth = (req, res, next) => {
-    // Reutiliza la función 'auth' para verificar el token primero
-    auth(req, res, () => {
-        // Verifica si el rol es 'admin'
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({ message: 'Acceso denegado: Se requiere rol de Administrador' });
-        }
-        next();
-    });
-};
-
-
-// --- 3. RUTAS DE LA API ACTUALIZADAS ---
-
-// Ruta GET: para obtener los últimos 100 registros (protegida por autenticación)
-app.get('/api/data/latest', auth, async (req, res) => {
-    try {
-        const latestData = await DataModel.find()
-            .sort({ timestamp: -1 })
-            .limit(100);
-            
-        // Cambiamos el nombre de la propiedad 'value' a 'valor' para que coincida con el frontend
-        const formattedData = latestData.map(item => ({
-            timestamp: item.timestamp,
-            valor: item.value,
-            type: item.type
-        }));
-
-        res.json(formattedData.reverse()); 
-    } catch (error) {
-        console.error("Error al obtener datos:", error.message);
-        res.status(500).json({ message: 'Error en el servidor' });
-    }
+mongoose.connect(MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+}).then(() => {
+    console.log('MongoDB conectado (vía Docker Host)...');
+}).catch(err => {
+    console.error('Error de conexión con MongoDB:', err.message);
+    console.error('Asegúrate de que MongoDB esté corriendo en tu PC (no en Docker) y accesible en el puerto 27017.');
 });
 
-// Ruta POST: para recibir nuevos datos del inyector (no requiere auth)
-app.post('/api/data', async (req, res) => {
-    // ... La lógica de guardar datos es la misma ...
-    try {
-        // Ajustamos la creación del modelo para usar 'value'
-        const dataToSave = {
-            value: req.body.valor || req.body.value, // Soporte para 'valor' o 'value'
-            type: req.body.type || 'kWh',
-            timestamp: req.body.timestamp
-        };
-        const newData = new DataModel(dataToSave);
+// --- 3. SERVIR EL FRONTEND ESTÁTICO (NUEVO PARA DOCKER) ---
+// Le decimos a Express que sirva todos los archivos estáticos (el build de React)
+// desde una carpeta llamada 'public' en el directorio actual del backend.
+app.use(express.static(path.join(__dirname, 'public')));
+// --- Fin de la sección estática ---
 
-        await newData.save();
-        console.log(`[POST] Dato guardado: ${newData.value} ${newData.type}`);
-        res.status(201).json(newData);
-    } catch (error) {
-        console.error("Error al guardar dato:", error.message);
-        res.status(400).json({ message: 'Error al procesar la solicitud', error: error.message });
-    }
+
+// --- Rutas de la API ---
+
+/*
+* @route   POST /api/auth/register
+* @desc    Registrar un nuevo usuario (Ruta de Admin)
+* @access  Private (requiere token de admin, aunque aquí está simplificado)
+*/
+app.post('/api/auth/register', async (req, res) => {
+    const { email, password, role } = req.body;
+
+    try {
+        // 1. Verificar si el usuario ya existe
+        let user = await User.findOne({ email });
+        if (user) {
+            return res.status(400).json({ msg: 'El usuario ya existe' });
+        }
+
+        // 2. Crear nuevo usuario
+        user = new User({
+            email,
+            password,
+            role: role || 'user' // 'user' por defecto si no se especifica
+        });
+
+        // 3. Hashear la contraseña
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(password, salt);
+
+        // 4. Guardar en la BD
+        await user.save();
+
+        // 5. Crear y devolver el token (Opcional, pero bueno para UX)
+        const payload = {
+            user: {
+                id: user.id,
+                role: user.role
+            }
+        };
+
+        jwt.sign(
+            payload,
+            process.env.JWT_SECRET || 'mi_secreto_jwt_muy_seguro', // (Mejor usar variable de entorno)
+            { expiresIn: '5h' },
+            (err, token) => {
+                if (err) throw err;
+                res.status(201).json({ msg: `Usuario ${email} (${role}) creado.` });
+            }
+        );
+
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Error del servidor');
+    }
 });
 
-// --- NUEVAS RUTAS DE AUTENTICACIÓN Y ADMINISTRACIÓN ---
-
-// RUTA POST /api/auth/register: Crear un nuevo usuario (solo para admin)
-app.post('/api/auth/register', adminAuth, async (req, res) => {
-    const { email, password, role } = req.body;
-    try {
-        let user = await UserModel.findOne({ email });
-        if (user) {
-            return res.status(400).json({ message: 'El usuario ya existe' });
-        }
-
-        user = new UserModel({ email, password, role: role || 'user' });
-
-        await user.save();
-        res.status(201).json({ message: 'Usuario creado exitosamente.' });
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Error de servidor');
-    }
-});
-
-// RUTA POST /api/auth/login: Iniciar sesión
+/*
+* @route   POST /api/auth/login
+* @desc    Autenticar usuario y obtener token
+* @access  Public
+*/
 app.post('/api/auth/login', async (req, res) => {
-    const { email, password } = req.body;
-    try {
-        let user = await UserModel.findOne({ email });
-        if (!user) {
-            return res.status(400).json({ message: 'Credenciales inválidas' });
-        }
+    const { email, password } = req.body;
 
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-            return res.status(400).json({ message: 'Credenciales inválidas' });
-        }
+    try {
+        // 1. Verificar si el usuario existe
+        let user = await User.findOne({ email });
+        if (!user) {
+            return res.status(400).json({ msg: 'Credenciales inválidas' });
+        }
 
-        // Si las credenciales son válidas, generar JWT
-        const payload = {
-            user: {
-                id: user.id,
-                email: user.email,
-                role: user.role,
-            },
-        };
+        // 2. Comparar contraseñas
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ msg: 'Credenciales inválidas' });
+        }
 
-        jwt.sign(
-            payload,
-            process.env.JWT_SECRET || 'secret_key', // Usar variable de entorno o fallback
-            { expiresIn: '5h' },
-            (err, token) => {
-                if (err) throw err;
-                res.json({ token, role: user.role, email: user.email });
-            }
-        );
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Error de servidor');
-    }
+        // 3. Crear y devolver el token
+        const payload = {
+            user: {
+                id: user.id,
+                role: user.role
+            }
+        };
+
+        jwt.sign(
+            payload,
+            process.env.JWT_SECRET || 'mi_secreto_jwt_muy_seguro',
+            { expiresIn: '5h' },
+            (err, token) => {
+                if (err) throw err;
+                // Enviar el token, el rol y el email
+                res.json({
+                    token,
+                    role: user.role,
+                    email: user.email
+                });
+            }
+        );
+
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Error del servidor');
+    }
 });
 
-// RUTA GET /api/admin/users: Obtener lista de usuarios (solo para admin)
-app.get('/api/admin/users', adminAuth, async (req, res) => {
-    try {
-        // Excluir el campo password por seguridad
-        const users = await UserModel.find().select('-password');
-        res.json(users);
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Error de servidor');
-    }
+// --- Middleware de Autenticación (para proteger rutas) ---
+const auth = (req, res, next) => {
+    const authHeader = req.header('Authorization');
+    
+    if (!authHeader) {
+        return res.status(401).json({ msg: 'No hay token, autorización denegada' });
+    }
+
+    try {
+        const token = authHeader.split(' ')[1]; // Quita "Bearer "
+        if (!token) {
+            return res.status(401).json({ msg: 'Token malformado' });
+        }
+        
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'mi_secreto_jwt_muy_seguro');
+        req.user = decoded.user;
+        next();
+    } catch (err) {
+        res.status(401).json({ msg: 'Token no es válido' });
+    }
+};
+
+/*
+* @route   POST /api/data/inject
+* @desc    Ruta (no protegida) para que el script inyector inserte datos
+* @access  Public
+*/
+app.post('/api/data/inject', async (req, res) => {
+    try {
+        const { sensorId, valor } = req.body;
+        const newData = new SensorData({
+            sensorId,
+            valor,
+            timestamp: new Date()
+        });
+        await newData.save();
+        res.status(201).json(newData);
+    } catch (err) {
+        console.error('Error al inyectar datos:', err.message);
+        res.status(500).send('Error del servidor');
+    }
+});
+
+/*
+* @route   GET /api/data/latest
+* @desc    Obtener los últimos 50 puntos de datos
+* @access  Private (requiere token)
+*/
+app.get('/api/data/latest', auth, async (req, res) => {
+    try {
+        // Obtenemos los 50 registros más recientes, ordenados por timestamp descendente
+        const data = await SensorData.find()
+            .sort({ timestamp: -1 })
+            .limit(50);
+        
+        // Los invertimos para que 'recharts' los pinte de izq. a der. (antiguo a nuevo)
+        res.json(data.reverse());
+
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Error del servidor');
+    }
 });
 
 
-// Conexión a MongoDB y arranque del servidor
-mongoose.connect(process.env.MONGO_URI)
-    .then(async () => {
-        console.log('--- Conectado a MongoDB local ---');
-        
-        // ** CREAR USUARIO ADMIN INICIAL (SOLO SI NO EXISTE) **
-        const adminEmail = 'admin@energisense.com';
-        let adminUser = await UserModel.findOne({ email: adminEmail });
-        
-        if (!adminUser) {
-            console.log('--- Creando usuario Administrador inicial... ---');
-            adminUser = new UserModel({
-                email: adminEmail,
-                password: 'password123', // Será hasheada automáticamente por el pre-save hook
-                role: 'admin',
-            });
-            await adminUser.save();
-            console.log(`--- ADMIN CREADO: Email: ${adminEmail}, Contraseña: password123 ---`);
-        } else {
-            console.log(`--- Usuario Administrador (${adminEmail}) ya existe. ---`);
-        }
+// --- 4. RUTA CATCH-ALL (NUEVO PARA DOCKER) ---
+// Para cualquier otra ruta que no sea de la API (ej. /dashboard, /admin),
+// le decimos a Express que simplemente devuelva el archivo principal de React.
+// React (React Router) se encargará de mostrar el componente correcto.
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
-        app.listen(PORT, () => {
-            console.log(`--- Servidor Express corriendo en http://localhost:${PORT} ---`);
-        });
-    })
-    .catch((error) => {
-        console.error('*** Error de conexión a MongoDB ***:', error.message);
-    });
 
-module.exports = app;
+// --- Iniciar Servidor ---
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Servidor corriendo en el puerto ${PORT}`));

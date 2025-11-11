@@ -1,0 +1,115 @@
+/* style.css */
+body {
+    font-family: 'Arial', sans-serif;
+    /* El fondo lo maneja Tailwind en el HTML, pero lo dejamos aquí por si acaso */
+    background-color: #111827; 
+    color: #e5e7eb;
+    margin: 0;
+    padding: 20px;
+}
+
+.game-container {
+    background-color: #1f2937; /* Gris oscuro estilo dashboard */
+    border: 2px solid #06b6d4; /* Borde cian estilo dashboard */
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
+    padding: 20px;
+    text-align: center;
+    border-radius: 15px;
+    width: 100%;
+    max-width: 850px; /* Evita que se haga demasiado ancho */
+}
+
+h1 {
+    color: #06b6d4; /* Cian */
+    margin-bottom: 20px;
+}
+
+canvas {
+    background-color: #15803d; /* Verde cancha más moderno */
+    border: 3px solid #374151;
+    border-radius: 8px;
+    display: block;
+    margin: 0 auto 20px auto;
+    
+    /* ESTO ES CLAVE PARA QUE SEA RESPONSIVO SIN ROMPER TU JS */
+    max-width: 100%;
+    height: auto;
+}
+
+.controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.power-bar-container {
+    width: 100%;
+    max-width: 400px; /* Ancho máximo para la barra */
+    height: 25px;
+    background-color: #374151;
+    border: 2px solid #4b5563;
+    position: relative;
+    margin-bottom: 20px;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.power-bar {
+    height: 100%;
+    width: 0;
+    background: linear-gradient(90deg, #facc15, #fb923c, #ef4444); /* Amarillo -> Naranja -> Rojo */
+    transition: width 0.05s linear;
+}
+
+.optimum-zone {
+    position: absolute;
+    top: 0;
+    left: 40%;
+    width: 20%;
+    height: 100%;
+    background-color: rgba(74, 222, 128, 0.5); /* Verde semitransparente */
+    border-left: 2px dashed #22c55e;
+    border-right: 2px dashed #22c55e;
+}
+
+#shootButton {
+    padding: 15px 40px;
+    font-size: 1.3em;
+    font-weight: bold;
+    cursor: pointer;
+    background-color: #06b6d4; /* Cian */
+    color: #111827; /* Texto oscuro */
+    border: none;
+    border-radius: 8px;
+    transition: all 0.2s;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+#shootButton:hover {
+    background-color: #22d3ee;
+    transform: scale(1.05);
+}
+
+#shootButton:active {
+    transform: scale(0.95);
+}
+
+.scoreboard {
+    display: flex;
+    justify-content: space-around;
+    flex-wrap: wrap;
+    background-color: #374151;
+    padding: 15px;
+    border-radius: 10px;
+    font-size: 1.1em;
+}
+
+.scoreboard p {
+    margin: 5px 15px;
+}
+
+.scoreboard span {
+    font-weight: bold;
+    color: #06b6d4;
+}

@@ -1,6 +1,7 @@
 // Script para simular el envío de datos de energía a la API cada 5 segundos
 const axios = require('axios');
-const API_URL = 'http://localhost:5000/api/data';
+// Apuntamos a localhost:5000, donde está nuestro contenedor Docker
+const API_URL = 'http://localhost:5000/api/data/inject';
 
 console.log('[+] Iniciando Inyector de datos. Enviando a ' + API_URL + ' cada 5 segundos');
 
@@ -12,25 +13,31 @@ function generateRandomConsumption() {
 
 // Función principal para enviar el dato a la API
 async function sendData() {
-    const value = generateRandomConsumption();
+    const randomValue = generateRandomConsumption();
     
     try {
+        // --- *** CORRECCIÓN *** ---
+        // El 'payload' debe coincidir con el Schema de Mongoose en server.js
         const payload = {
-            value: parseFloat(value),
-            type: 'kWh', 
-            timestamp: new Date()
+            sensorId: "Sensor-01 (Industrial)", // <-- ERROR 2 ARREGLADO: Añadimos un ID
+            valor: parseFloat(randomValue)     // <-- ERROR 1 ARREGLADO: Cambiado de 'value' a 'valor'
+            // No necesitamos 'type' o 'timestamp', el servidor los maneja.
         };
+        // --- *** FIN DE LA CORRECCIÓN *** ---
 
-        // Hace la petición POST al servidor Express
+        // Hace la petición POST al servidor Express (en Docker)
         await axios.post(API_URL, payload);
-        console.log(`[${new Date().toLocaleTimeString()}] ✅ Dato enviado: ${value} kWh`);
+        console.log(`[${new Date().toLocaleTimeString()}] ✅ Dato enviado: ${randomValue} kWh`);
 
     } catch (error) {
-        console.error(`[${new Date().toLocaleTimeString()}] ❌ Error al enviar dato. ¿El servidor Express está corriendo en la Terminal 1?`);
+        console.error(`[${new Date().toLocaleTimeString()}] ❌ Error al enviar dato. ¿El servidor Express está corriendo?`);
         if (error.response) {
-             console.error(`Status: ${error.response.status}, Mensaje: ${error.response.data.message}`);
+            // El error 500 que veíamos antes
+             console.error(`Status: ${error.response.status}, Mensaje: ${error.response.data}`);
         } else if (error.code === 'ECONNREFUSED') {
-             console.error(`ERROR: Conexión rechazada. Asegúrate que el servidor Express esté iniciado en http://localhost:5000.`);
+             console.error(`ERROR: Conexión rechazada. Asegúrate que el contenedor Docker esté corriendo.`);
+        } else {
+            console.error(error.message);
         }
     }
 }

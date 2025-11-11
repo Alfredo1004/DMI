@@ -1,5 +1,6 @@
 # ----------------------------------------
 # DEPENDENCIAS Y CACHÉ (NO SUBIR NUNCA)
+# (Tu archivo original)
 # ----------------------------------------
 node_modules
 /backend/node_modules
@@ -8,3 +9,22 @@ node_modules
 /frontend/dist
 /frontend/.vite/
 npm-debug.log
+
+# ----------------------------------------
+# ARCHIVOS DE ANDROID (AÑADIR ESTO)
+# ----------------------------------------
+# Carpetas de compilación de Android Studio
+/android/build/
+/android/app/build/
+/android/.gradle/
+/android/.idea/
+
+# Archivos locales de configuración de Android
+/android/local.properties
+
+# ----------------------------------------
+# ARCHIVOS DE IDE Y SO (OPCIONAL PERO RECOMENDADO)
+# ----------------------------------------
+.vscode/
+.DS_Store
+*.log

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EnergyFutbol</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-gray-900 flex items-center justify-center min-h-screen">
+
+    <div class="game-container">
+        <h1>EnergyFutbol: El Reto de la Puntería Eficiente</h1>
+
+        <canvas id="gameCanvas" width="800" height="500"></canvas>
+        
+        <div class="controls">
+            <div class="power-bar-container">
+                <div id="powerBar" class="power-bar"></div>
+                <div id="optimumZone" class="optimum-zone"></div>
+            </div>
+            <button id="shootButton">¡Chutar!</button>
+        </div>
+
+        <div class="scoreboard">
+            <p>Goles Marcados: <span id="golesMarcados">0</span></p>
+            <p>Consumo Total: <span id="consumoTotal">0</span> kW</p>
+            <p>Eficiencia: <span id="eficiencia">0.00</span></p>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
